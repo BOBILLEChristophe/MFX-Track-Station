@@ -134,6 +134,16 @@ The UID can be read for example with an MS2 and the `MfxObserver` example of [Ra
 2. In the **Options** tab, tick **Master**: Rocrail then plays the part of the MS2, gives the addresses and creates the locomotives. Restart Rocrail.
 3. Click **Go** to power the track, then put the locomotives on it: each one appears in the list of Rocrail, with its name read in the decoder. **Save the plan** to keep the locomotives created.
 
+### CAN bus (MS2)
+
+The command station also has the Märklin CAN bus (250 kbit/s) of the Box: RX on GPIO 4, TX on GPIO 5, with a 3.3 V CAN transceiver. An MS2 can be connected to it, as to a Gleisbox. The command station is then a gateway between the bus and Rocrail, as a CS2 is:
+
+- each frame of Rocrail is copied to the bus, each frame of the bus is passed to Rocrail;
+- the command station executes the orders of either side (speed, direction, functions, stop and go), and answers as a Gleisbox: an order is confirmed, a request gets the state of the locomotive;
+- it does not answer the requests for configuration files coming from the bus: the master (Rocrail) does.
+
+Rocrail stays the master: the MS2 must be a slave. The serial log prints each frame received from the bus (lines `CAN:`, pings left out); `Message::setBusTrace(false)` turns them off. The library is ACAN_ESP32 by Pierre Molinaro, version 1.1.2 (versions 1.2 and later need the Arduino core 3).
+
 ### Contributing
 
 Contributions are welcome! If you want to take part, please open an **issue** or submit a **pull request**.

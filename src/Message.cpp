@@ -24,6 +24,8 @@ uint8_t Message::prio = 0;
 uint8_t Message::cmd = 0;
 uint8_t Message::response = 0;
 uint16_t Message::hash = 0;
+bool Message::fromBus = false;
+bool Message::traceBus = true;
 uint8_t Message::data[8] = {0};
 byte Message::buff[BUFF_MSG_SIZE] = {0};
 
@@ -214,6 +216,16 @@ void Message::parse()
 
     if (cmd == CAN_CONFIG_DATA)
     {
+        // A Gleisbox does not answer: a device of the bus (an MS2) asks
+        // Rocrail, which gets the request through the command station
+        if (fromBus)
+        {
+            char name[9];
+            memcpy(name, data, 8);
+            name[8] = 0;
+            Serial.printf("CAN: a device asks Rocrail for the configuration \"%s\"\n", name);
+            return;
+        }
         configRequest();
         return;
     }
@@ -384,6 +396,7 @@ void Message::parse()
                        (cmd == CAN_LOCO_FUNCT && length >= 6);
     if (order)
         sendNow(currentLoco);
+    locoAnswer(currentLoco);
 
     if (traceCommands)
     {
@@ -447,6 +460,50 @@ bool Message::answer(uint8_t cmd, uint8_t len, const uint8_t *d)
     uint8_t frame[13];
     putFrame(frame, ((uint32_t)cmd << 17) | 0x00010000UL | cs2Hash(Centrale::gUid()), len, d);
     return sendToRocrail(frame, sizeof(frame));
+}
+
+/*
+ As a Gleisbox: an order to a locomotive (speed, direction, function) is
+ confirmed with the same bytes and the response bit; a request (shorter) is
+ answered with the state of the locomotive. An MS2 on the bus and Rocrail
+ both see the result.
+*/
+void Message::locoAnswer(Loco *l)
+{
+    uint8_t d[8];
+    memcpy(d, data, 8);
+    uint8_t len = length;
+    switch (cmd)
+    {
+    case CAN_LOCO_SPEED:
+        if (length < 6)
+        {
+            const uint16_t v = l->speed() == 0 ? 0 : (uint16_t)(((uint32_t)l->speed() * 1000 + 63) / 127);
+            d[4] = (uint8_t)(v >> 8);
+            d[5] = (uint8_t)v;
+            len = 6;
+        }
+        break;
+    case CAN_LOCO_DIREC:
+        if (length < 5)
+        {
+            d[4] = l->dir() == 0 ? 1 : 2;
+            len = 5;
+        }
+        break;
+    case CAN_LOCO_FUNCT:
+        if (length == 5)
+        {
+            d[5] = l->funct(data[4]) ? 1 : 0;
+            len = 6;
+        }
+        else if (length < 5)
+            return;
+        break;
+    default:
+        return;
+    }
+    answer(cmd, len, d);
 }
 
 static const uint16_t KENNUNG = 0x0001; // 0 and FFFF are not valid

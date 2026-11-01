@@ -52,6 +52,7 @@ private:
     static uint8_t data[8];
     static bool trace;         // Debug: internal tasks (very verbose)
     static bool traceCommands; // Commands received from Rocrail
+    static bool traceBus;      // Frames received from the CAN bus
     static byte buff[BUFF_MSG_SIZE];
     static Loco **loco;
     static volatile byte locoSize; // locomotives in loco[]
@@ -68,6 +69,12 @@ public:
     static bool removeLoco(uint16_t address);
     // Prints each command received from Rocrail (speed, direction, functions)
     static void setTrace(bool on) { traceCommands = on; }
+    // Origin of the frame being parsed: true for the CAN bus (an MS2...),
+    // false for Rocrail (TCP). Set by rxTask before parse().
+    static bool fromBus;
+    // Trace of the frames received from the CAN bus (pings left out)
+    static void setBusTrace(bool on) { traceBus = on; }
+    static bool busTrace() { return traceBus; }
     static void decodeMsg(byte *);
     static void parse();
     static void periodic(void *);
@@ -83,6 +90,8 @@ public:
 private:
     static void configRequest();
     static void pingAnswer();
+    // As a Gleisbox: confirms an order to a locomotive, answers a request
+    static void locoAnswer(Loco *l);
     // As a Gleisbox: answers a system command (echo, or the identifier)
     static void systemAnswer();
     // As a Gleisbox: the description of the device (command 0x1D, index 0)
