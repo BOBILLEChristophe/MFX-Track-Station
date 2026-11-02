@@ -463,23 +463,18 @@ static void printStats(const char *what, uint16_t *v, uint16_t n)
     Serial.printf("  %-22s min %3u  median %3u  max %3u\n", what, v[0], v[n / 2], v[n - 1]);
 }
 
-static void benchVerify(uint16_t a, uint16_t n)
+static void benchAsk(const MfxFrame &f, const char *what, uint16_t n)
 {
-    Loco *l = Loco::findLoco(a);
     if (n > 500)
         n = 500;
     uint16_t *col[6];
     for (uint8_t k = 0; k < 6; k++)
         col[k] = (uint16_t *)malloc(n * sizeof(uint16_t));
     uint16_t answers = 0, weak = 0;
-    Serial.printf("\nBench: %u verifies of %s (address %u)\n", n, l->name().c_str(), a);
+    Serial.printf("\nBench: %u %s\n", n, what);
     Serial.println("  #   window edges/regular/run   reference edges/regular/run   decision");
     for (uint16_t i = 0; i < n; i++)
     {
-        MfxFrame f;
-        f.address(a);
-        f.verify(l->uid32());
-        f.finish();
         Feedback::Result r = {};
         const bool yes = Feedback::ask(f, &r);
         const bool w = !yes && r.windowRegular >= WEAK_ANSWER_REGULAR;
@@ -511,6 +506,31 @@ static void benchVerify(uint16_t a, uint16_t n)
     }
     for (uint8_t k = 0; k < 6; k++)
         free(col[k]);
+}
+
+static void benchVerify(uint16_t a, uint16_t n)
+{
+    Loco *l = Loco::findLoco(a);
+    MfxFrame f;
+    f.address(a);
+    f.verify(l->uid32());
+    f.finish();
+    char what[64];
+    snprintf(what, sizeof(what), "verifies of %s (address %u)", l->name().c_str(), a);
+    benchAsk(f, what, n);
+}
+
+// Search question with the whole UID (32 bits): only the decoder with this
+// UID may answer, if it has no address yet (the 040 DE, for example)
+static void benchSearch(uint32_t uid, uint16_t n)
+{
+    MfxFrame f;
+    f.broadcast();
+    f.search(32, uid);
+    f.finish();
+    char what[64];
+    snprintf(what, sizeof(what), "search questions for the UID %08lX", (unsigned long)uid);
+    benchAsk(f, what, n);
 }
 
 static void benchRead(uint16_t a, uint16_t n)
@@ -640,11 +660,50 @@ static void console()
             else
                 benchRead(a, n ? n : 10);
         }
+        else if (c == 'S')
+        {
+            // S<UID in hex>[,count]: search questions with the whole UID (50).
+            // The whole line is read (up to the end of line, 1 s at most):
+            // the letters of the UID must not be taken for commands (E!)
+            char line[24];
+            uint8_t len = 0;
+            const uint32_t t0 = millis();
+            while (millis() - t0 < 1000)
+            {
+                if (Serial.available() == 0)
+                {
+                    vTaskDelay(pdMS_TO_TICKS(5));
+                    continue;
+                }
+                const int ch = Serial.read();
+                if (ch == '\n' || ch == '\r')
+                    break;
+                if (len < sizeof(line) - 1)
+                    line[len++] = (char)ch;
+            }
+            line[len] = 0;
+            uint32_t uid = 0;
+            uint16_t n = 0;
+            uint8_t digits = 0;
+            const char *q = line;
+            for (; isxdigit((unsigned char)*q); q++, digits++)
+                uid = uid << 4 | (uint32_t)(isdigit((unsigned char)*q) ? *q - '0' : (toupper((unsigned char)*q) - 'A' + 10));
+            if (*q == ',')
+                for (q++; isdigit((unsigned char)*q); q++)
+                    n = n * 10 + (*q - '0');
+            if (digits != 8)
+                Serial.println("\nS: S followed by the 8 hexadecimal digits of the UID, SF9E610E0 or SF9E610E0,100");
+            else if (!Centrale::power())
+                Serial.println("\nTest bench: the track is off");
+            else
+                benchSearch(uid, n ? n : 50);
+        }
         else if (c == '?')
             Serial.printf("\nCommands: R = re-registration of every decoder (counter %u -> %u, restart), "
                           "V = verify every declared locomotive, L = list the locomotives, C = read the configurations again, "
                           "D<address> = delete one locomotive (D4), M<address>[,n] = test bench, n verifies (M404,50), "
-                          "N<address>[,n] = test bench, n reads of the name (N404,10), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "N<address>[,n] = test bench, n reads of the name (N404,10), "
+                          "S<UID>[,n] = test bench, n search questions with the whole UID (SF9E610E0,50), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }
