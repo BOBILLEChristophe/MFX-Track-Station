@@ -243,6 +243,9 @@ void setup()
   // Test: the command station answers "ms2-conf" to an MS2 (Rocrail's answer
   // is refused by the MS2); false: Rocrail answers
   Message::setAnswerMs2Conf(true);
+  // Test: answer the pings of an MS2 as a CS2 GUI too (can2udp -g), so that
+  // it follows a Central Station; false: only the answers of the devices
+  Message::setSimulateGui(true);
   // Feedback sensor, before the signal task that uses it
   Feedback::setup(FEEDBACK_PIN);
   // Serial trace of the feedback: setTrace(cv, search)

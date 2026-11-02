@@ -54,6 +54,7 @@ private:
     static bool traceCommands; // Commands received from Rocrail
     static bool traceBus;      // Frames received from the CAN bus
     static bool answerMs2Conf; // "ms2-conf" answered by the command station
+    static bool simulateGui;   // ping answer of a CS2 GUI for an MS2
     static byte buff[BUFF_MSG_SIZE];
     static Loco **loco;
     static volatile byte locoSize; // locomotives in loco[]
@@ -80,6 +81,10 @@ public:
     // MS2 (format of can2udp, G. Bertelsmann), instead of Rocrail
     static void setAnswerMs2Conf(bool on) { answerMs2Conf = on; }
     static bool answersMs2Conf() { return answerMs2Conf; }
+    // Test: when an MS2 answers a ping, a ping answer of a CS2 GUI (type
+    // FFFF) is sent on the bus, as can2udp -g does to make it a CS2 slave
+    static void setSimulateGui(bool on) { simulateGui = on; }
+    static bool simulatesGui() { return simulateGui; }
     static void decodeMsg(byte *);
     static void parse();
     static void periodic(void *);

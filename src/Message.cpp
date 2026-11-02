@@ -28,6 +28,7 @@ uint16_t Message::hash = 0;
 bool Message::fromBus = false;
 bool Message::traceBus = true;
 bool Message::answerMs2Conf = true;
+bool Message::simulateGui = false;
 uint8_t Message::data[8] = {0};
 byte Message::buff[BUFF_MSG_SIZE] = {0};
 
