@@ -563,6 +563,46 @@ static void benchSearch(uint32_t uid, uint16_t n, uint32_t pauseMs)
     benchAsk(f, what, n, pauseMs);
 }
 
+/*
+ Search questions for every count from 0 to 32, with the UID given (exact)
+ or with its first `count` bits followed by ones (as the search asks them):
+ up to TRIES tries each, MISS_PAUSE_MS apart. Shows which counts the
+ decoder answers (the 040 DE stops at count 8, 2 Nov).
+*/
+static void benchSweep(uint32_t uid, bool ones)
+{
+    Serial.printf("\nBench: search questions for the UID %08lX, count 0 to 32, %s\n", (unsigned long)uid,
+                  ones ? "the other bits at 1 (as the search)" : "whole UID");
+    uint8_t answered = 0;
+    for (uint8_t count = 0; count <= 32; count++)
+    {
+        uint32_t q = uid;
+        if (ones && count < 32)
+            q |= (count == 0) ? 0xFFFFFFFFUL : ((1UL << (32 - count)) - 1);
+        MfxFrame f;
+        f.broadcast();
+        f.search(count, q);
+        f.finish();
+        uint8_t got = 0;
+        Feedback::Result r = {};
+        for (uint8_t t = 1; t <= TRIES && !got; t++)
+        {
+            if (Feedback::ask(f, &r))
+                got = t;
+            else if (t < TRIES)
+                vTaskDelay(pdMS_TO_TICKS(MISS_PAUSE_MS));
+        }
+        answered += got != 0;
+        if (got)
+            Serial.printf("  count %2u  question %08lX  answer at try %u (%u regular, run %u)\n", count,
+                          (unsigned long)q, got, r.windowRegular, r.windowRun);
+        else
+            Serial.printf("  count %2u  question %08lX  NO ANSWER in %u tries\n", count, (unsigned long)q, TRIES);
+        vTaskDelay(pdMS_TO_TICKS(ANSWER_PAUSE_MS));
+    }
+    Serial.printf("Bench: %u counts answered out of 33\n", answered);
+}
+
 static void benchRead(uint16_t a, uint16_t n)
 {
     Loco *l = Loco::findLoco(a);
@@ -690,7 +730,7 @@ static void console()
             else
                 benchRead(a, n ? n : 10);
         }
-        else if (c == 'S')
+        else if (c == 'S' || c == 'T')
         {
             // S<UID in hex>[,count]: search questions with the whole UID (50).
             // The whole line is read (up to the end of line, 1 s at most):
@@ -729,9 +769,12 @@ static void console()
                     pause = pause * 10 + (*q - '0');
             }
             if (digits != 8)
-                Serial.println("\nS: S followed by the 8 hexadecimal digits of the UID, SF9E610E0 or SF9E610E0,100 or SF9E610E0,50,300 (pause in ms)");
+                Serial.println("\nS: S followed by the 8 hexadecimal digits of the UID, SF9E610E0 or SF9E610E0,100 or SF9E610E0,50,300 (pause in ms);"
+                               " T<UID> = every count, whole UID; T<UID>,1 = every count, the other bits at 1");
             else if (!Centrale::power())
                 Serial.println("\nTest bench: the track is off");
+            else if (c == 'T')
+                benchSweep(uid, n != 0);
             else
                 benchSearch(uid, n ? n : 50, pause);
         }
@@ -740,7 +783,8 @@ static void console()
                           "V = verify every declared locomotive, L = list the locomotives, C = read the configurations again, "
                           "D<address> = delete one locomotive (D4), M<address>[,n] = test bench, n verifies (M404,50), "
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
-                          "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "
+                          "T<UID>[,1] = test bench, search questions for every count (,1: other bits at 1), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }
