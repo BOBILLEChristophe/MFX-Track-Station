@@ -659,13 +659,28 @@ static void console()
         else if (c == 'C')
         {
             // Read the configurations again (a decoder changed, or to test
-            // the reading): forgotten, then read as at start-up
+            // the reading): forgotten, then read as at start-up.
+            // C<address>: this locomotive only (the others are kept)
+            vTaskDelay(pdMS_TO_TICKS(50)); // the rest of the line
+            uint16_t only = 0;
+            while (Serial.available() > 0 && isdigit(Serial.peek()))
+                only = only * 10 + (Serial.read() - '0');
+            if (only != 0 && Loco::findLoco(only) == nullptr)
+            {
+                Serial.printf("\nC%u: no locomotive at this address (L lists them)\n", only);
+                continue;
+            }
             uint16_t list[32];
             const uint8_t count = knownAddresses(list, 32);
             for (uint8_t i = 0; i < count; i++)
                 if (Loco *l = Loco::findLoco(list[i]))
                 {
                     const uint16_t a = list[i];
+                    if (only != 0 && a != only)
+                    {
+                        sReadTries[a] = READ_TRIES; // kept, not read
+                        continue;
+                    }
                     MfxInfo none;
                     memset(&none, 0, sizeof(none));
                     l->mfxInfo(none);
@@ -673,7 +688,10 @@ static void console()
                 }
             LocoStore::save();
             sRereadConfigs = true;
-            Serial.println("\nConfigurations forgotten: read again");
+            if (only)
+                Serial.printf("\nConfiguration of address %u forgotten: read again\n", only);
+            else
+                Serial.println("\nConfigurations forgotten: read again");
         }
         else if (c == 'E')
         {
@@ -809,7 +827,7 @@ static void console()
         }
         else if (c == '?')
             Serial.printf("\nCommands: R = re-registration of every decoder (counter %u -> %u, restart), "
-                          "V = verify every declared locomotive, L = list the locomotives, C = read the configurations again, "
+                          "V = verify every declared locomotive, L = list the locomotives, C = read the configurations again (C404: one locomotive), "
                           "D<address> = delete one locomotive (D4), M<address>[,n] = test bench, n verifies (M404,50), "
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
                           "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "
