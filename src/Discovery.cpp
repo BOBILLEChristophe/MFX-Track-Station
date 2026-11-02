@@ -630,10 +630,31 @@ void Discovery::requestRead(uint32_t locId, uint16_t cv, uint8_t index, uint8_t 
  order "locomotive identifier, index << 10 | CV, count"; the Gleisbox
  answers each byte in a frame of 7 bytes: identifier, index << 10 | CV
  (the index of this byte), value. Read on the track 2 bytes at a time, as
- the MS2 does. Nothing is answered for the bytes that could not be read.
+ the MS2 does. A byte that could not be read is answered with 6 bytes
+ (no value), as the Gleisbox does; address 0 (broadcast) is not read.
 */
+// A byte not read: identifier and index << 10 | CV only, 6 bytes (as the
+// Gleisbox answers, recorded 2 Nov 2026)
+static void readFailed(const MasterOrder &o, uint8_t from)
+{
+    for (uint8_t i = from; i < o.count; i++)
+    {
+        const uint16_t ic = (uint16_t)((o.index + i) & 0x3F) << 10 | (o.cv & 0x3FF);
+        const uint8_t d[6] = {(uint8_t)(o.uid >> 24), (uint8_t)(o.uid >> 16), (uint8_t)(o.uid >> 8),
+                              (uint8_t)o.uid, (uint8_t)(ic >> 8), (uint8_t)ic};
+        Message::answer(CAN_READ_CONFIG, 6, d);
+    }
+}
+
 static void readForMaster(const MasterOrder &o)
 {
+    // Address 0 is the broadcast: every decoder would answer together
+    if (o.sid == 0)
+    {
+        Serial.printf("Discovery: read of CV %u at address 0 refused (every decoder would answer)\n", o.cv);
+        readFailed(o, 0);
+        return;
+    }
     uint8_t done = 0;
     while (done < o.count)
     {
@@ -644,6 +665,7 @@ static void readForMaster(const MasterOrder &o)
         {
             Serial.printf("Discovery: read of CV %u index %u at address %u for the master: no answer\n", o.cv,
                           index, o.sid);
+            readFailed(o, done);
             return;
         }
         for (uint8_t k = 0; k < n; k++)
