@@ -463,7 +463,7 @@ static void printStats(const char *what, uint16_t *v, uint16_t n)
     Serial.printf("  %-22s min %3u  median %3u  max %3u\n", what, v[0], v[n / 2], v[n - 1]);
 }
 
-static void benchAsk(const MfxFrame &f, const char *what, uint16_t n)
+static void benchAsk(const MfxFrame &f, const char *what, uint16_t n, uint32_t pauseMs = ANSWER_PAUSE_MS)
 {
     if (n > 500)
         n = 500;
@@ -471,7 +471,7 @@ static void benchAsk(const MfxFrame &f, const char *what, uint16_t n)
     for (uint8_t k = 0; k < 6; k++)
         col[k] = (uint16_t *)malloc(n * sizeof(uint16_t));
     uint16_t answers = 0, weak = 0;
-    Serial.printf("\nBench: %u %s\n", n, what);
+    Serial.printf("\nBench: %u %s, %lu ms between two questions\n", n, what, (unsigned long)pauseMs + 30);
     Serial.println("  #   window edges/regular/run   reference edges/regular/run   decision");
     for (uint16_t i = 0; i < n; i++)
     {
@@ -492,7 +492,7 @@ static void benchAsk(const MfxFrame &f, const char *what, uint16_t n)
         Serial.printf("  %3u   %4d / %3u / %3u           %4d / %3u / %3u            %s\n", i + 1, r.window,
                       r.windowRegular, r.windowRun, r.reference, r.referenceRegular, r.referenceRun,
                       yes ? "answer" : w ? "weak (counted as present)" : "no answer");
-        vTaskDelay(pdMS_TO_TICKS(ANSWER_PAUSE_MS));
+        vTaskDelay(pdMS_TO_TICKS(pauseMs));
     }
     Serial.printf("Bench: %u answers, %u weak, %u no answer, out of %u\n", answers, weak, n - answers - weak, n);
     if (col[0] && col[5])
@@ -522,7 +522,7 @@ static void benchVerify(uint16_t a, uint16_t n)
 
 // Search question with the whole UID (32 bits): only the decoder with this
 // UID may answer, if it has no address yet (the 040 DE, for example)
-static void benchSearch(uint32_t uid, uint16_t n)
+static void benchSearch(uint32_t uid, uint16_t n, uint32_t pauseMs)
 {
     MfxFrame f;
     f.broadcast();
@@ -530,7 +530,7 @@ static void benchSearch(uint32_t uid, uint16_t n)
     f.finish();
     char what[64];
     snprintf(what, sizeof(what), "search questions for the UID %08lX", (unsigned long)uid);
-    benchAsk(f, what, n);
+    benchAsk(f, what, n, pauseMs);
 }
 
 static void benchRead(uint16_t a, uint16_t n)
@@ -688,22 +688,29 @@ static void console()
             const char *q = line;
             for (; isxdigit((unsigned char)*q); q++, digits++)
                 uid = uid << 4 | (uint32_t)(isdigit((unsigned char)*q) ? *q - '0' : (toupper((unsigned char)*q) - 'A' + 10));
+            uint32_t pause = ANSWER_PAUSE_MS;
             if (*q == ',')
                 for (q++; isdigit((unsigned char)*q); q++)
                     n = n * 10 + (*q - '0');
+            if (*q == ',')
+            {
+                pause = 0;
+                for (q++; isdigit((unsigned char)*q); q++)
+                    pause = pause * 10 + (*q - '0');
+            }
             if (digits != 8)
-                Serial.println("\nS: S followed by the 8 hexadecimal digits of the UID, SF9E610E0 or SF9E610E0,100");
+                Serial.println("\nS: S followed by the 8 hexadecimal digits of the UID, SF9E610E0 or SF9E610E0,100 or SF9E610E0,50,300 (pause in ms)");
             else if (!Centrale::power())
                 Serial.println("\nTest bench: the track is off");
             else
-                benchSearch(uid, n ? n : 50);
+                benchSearch(uid, n ? n : 50, pause);
         }
         else if (c == '?')
             Serial.printf("\nCommands: R = re-registration of every decoder (counter %u -> %u, restart), "
                           "V = verify every declared locomotive, L = list the locomotives, C = read the configurations again, "
                           "D<address> = delete one locomotive (D4), M<address>[,n] = test bench, n verifies (M404,50), "
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
-                          "S<UID>[,n] = test bench, n search questions with the whole UID (SF9E610E0,50), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }
