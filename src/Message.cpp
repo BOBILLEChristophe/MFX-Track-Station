@@ -315,7 +315,8 @@ void Message::parse()
 
     if (cmd < CAN_LOCO_SPEED || cmd > CAN_LOCO_FUNCT || length < 4)
     {
-        traceUnknown();
+        if (!(cmd == 0x21 && traceBus)) // config streams: printed by rxTask
+            traceUnknown();
         return;
     }
 

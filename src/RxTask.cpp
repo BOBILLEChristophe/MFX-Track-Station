@@ -12,13 +12,14 @@
 #include "RxTask.h"
 #include "CanBus.h"
 
-// Prints a frame received from the bus (pings left out: every few seconds)
-static void traceBusFrame(const uint8_t *f)
+// Prints a frame received from the bus (pings left out: every few seconds),
+// or sent by Rocrail to the bus (prefix "Rocrail->CAN")
+static void traceBusFrame(const uint8_t *f, const char *prefix = "CAN")
 {
     const uint8_t cmd = (uint8_t)(f[1] >> 1);
     if (cmd == CAN_PING)
         return;
-    Serial.printf("CAN: cmd 0x%02X%s hash %02X%02X (%u bytes:", cmd, (f[1] & 1) ? " R" : "", f[2], f[3], f[4]);
+    Serial.printf("%s: cmd 0x%02X%s hash %02X%02X (%u bytes:", prefix, cmd, (f[1] & 1) ? " R" : "", f[2], f[3], f[4]);
     for (uint8_t i = 0; i < f[4] && i < 8; i++)
         Serial.printf(" %02X", f[5 + i]);
     Serial.println(")");
@@ -33,6 +34,10 @@ void rxTask(void *pvParameters)
         while (readRocrailFrame(rxBuffer, BUFFER_S))
         {
             CanBus::send(rxBuffer, BUFFER_S);
+            // Configuration files sent by Rocrail (to an MS2): every frame
+            const uint8_t cmd = (uint8_t)(rxBuffer[1] >> 1);
+            if (Message::busTrace() && CanBus::ready() && (cmd == 0x20 || cmd == 0x21))
+                traceBusFrame(rxBuffer, "Rocrail->CAN");
             Message::fromBus = false;
             Message::decodeMsg(rxBuffer);
             Message::parse();

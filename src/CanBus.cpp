@@ -41,8 +41,17 @@ void CanBus::send(const uint8_t *frames, size_t len)
             m.data[i] = f[5 + i];
         // The driver keeps a few frames: wait a little if it is full
         uint8_t tries = 0;
-        while (!ACAN_ESP32::can.tryToSend(m) && ++tries < 20)
+        bool sent;
+        while (!(sent = ACAN_ESP32::can.tryToSend(m)) && ++tries < 20)
             vTaskDelay(pdMS_TO_TICKS(1));
+        if (!sent)
+        {
+            static uint32_t lost = 0;
+            lost++;
+            if (lost <= 5 || lost % 100 == 0)
+                Serial.printf("CAN: frame 0x%02X not sent (bus busy or no other device), %lu lost\n",
+                              (unsigned)(m.id >> 17) & 0xFF, (unsigned long)lost);
+        }
     }
 }
 
