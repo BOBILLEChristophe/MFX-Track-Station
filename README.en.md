@@ -138,7 +138,7 @@ The UID can be read for example with an MS2 and the `MfxObserver` example of [Ra
 
 1. Declare an **MBUS** command station (Märklin CAN, TCP sublibrary), with the IP address of the command station and port **15731**.
 2. In the **Options** tab, tick **Master**: Rocrail then plays the part of the MS2, gives the addresses and creates the locomotives. Restart Rocrail.
-3. Click **Go** to power the track, then put the locomotives on it: each one appears in the list of Rocrail, with its name read in the decoder. **Note**: a locomotive created this way is only temporary for Rocrail (26.10.25); saving the plan is not enough, it disappears when Rocrail is closed. Open its properties, complete them if needed, then confirm (**OK**): it is then kept in the plan. Rocrail leaves its UID field at 0; the mfx UID can be entered there (printed on the serial monitor, command `L`).
+3. Click **Go** to power the track, then put the locomotives on it: each one appears in the list of Rocrail, with its name read in the decoder. **Note**: a locomotive created this way is only temporary for Rocrail (26.10.25); saving the plan is not enough, it disappears when Rocrail is closed. Open its properties, complete them if needed, then confirm (**OK**): it is then kept in the plan. Rocrail leaves its UID field at 0; the mfx UID can be entered there, **in decimal** (Rocrail does not keep a hexadecimal value): F9E610E0 is written 4192604384. The serial monitor prints the UIDs in hexadecimal (command `L`). The **Bind** button of this window is not needed: the command station and the decoder keep the address.
 
 ### CAN bus and MS2
 
