@@ -170,6 +170,9 @@ bool Discovery::readConfig(uint16_t sid, char *nameOut, size_t size)
     static MfxConfig c; // static: keeps the task stack small (one task only)
     const uint32_t t0 = millis();
     sMoving = false;
+    // Nothing else is printed until the end: about one second per CV
+    // block, a few minutes for a decoder with many functions
+    Serial.printf("Discovery: reading the configuration of address %u (a few minutes)...\n", sid);
     const MfxConfig::Status st = c.read(readFromTrack, (void *)(uintptr_t)sid);
     if (sMoving)
     {
