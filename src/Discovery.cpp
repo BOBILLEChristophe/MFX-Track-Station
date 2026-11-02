@@ -779,6 +779,13 @@ static void console()
             else
                 benchSearch(uid, n ? n : 50, pause);
         }
+        else if (c == 'A')
+        {
+            MfxSignal::alwaysFlip = !MfxSignal::alwaysFlip;
+            Serial.printf("\nTransition after the bits 0011: %s\n",
+                          MfxSignal::alwaysFlip ? "always (window level follows the frame)"
+                                                : "only to reach the window level (default)");
+        }
         else if (c == 'F')
         {
             // Test: F<µs> = flip before the answer window after this time
@@ -807,7 +814,7 @@ static void console()
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
                           "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "
                           "T<UID>[,1] = test bench, search questions for every count (,1: other bits at 1), "
-                          "F<us> = flip before the answer window (F2 default, F0 none), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "F<us> = flip before the answer window (F2 default, F0 none), A = transition after 0011 always (on/off), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }

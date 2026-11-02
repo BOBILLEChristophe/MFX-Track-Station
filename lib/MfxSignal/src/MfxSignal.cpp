@@ -6,6 +6,7 @@
 
 bool MfxSignal::windowLevel = true;
 uint16_t MfxSignal::answerFlipUs = MfxSignal::FORCE_US;
+bool MfxSignal::alwaysFlip = false;
 
 void MfxSignal::push(bool level0, bool level1, uint16_t duration0, uint16_t duration1)
 {
@@ -50,7 +51,9 @@ void MfxSignal::request(const uint8_t *insert)
     bit0();
     bit1();
     bit1();
-    if (answerFlipUs != 0)
+    if (alwaysFlip)
+        forceLevel(!mLevel, FORCE_US);
+    else if (answerFlipUs != 0)
         forceLevel(windowLevel, answerFlipUs);
 }
 
@@ -68,10 +71,11 @@ void MfxSignal::feedbackWindows(uint32_t *windowUs, uint32_t *referenceUs, const
 
     if (windowUs)
         *windowUs = durationUs();
+    const bool answerLevel = mLevel; // windowLevel, unless alwaysFlip
     hold(FEEDBACK_WINDOW_US);
 
     sync();
-    forceLevel(!windowLevel);
+    forceLevel(!answerLevel);
 
     if (referenceUs)
         *referenceUs = durationUs();

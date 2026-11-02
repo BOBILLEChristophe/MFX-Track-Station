@@ -81,6 +81,11 @@ public:
     // (ESU) does not answer when this flip is there (an odd number of
     // stuffed bits in the frame), test bench 2 Nov.
     static uint16_t answerFlipUs;
+    // Test (serial command A): a transition right after the bits 0011
+    // always (2 µs later, as the flip), the answer window then being at the
+    // level it gives. The 040 DE answered only the frames where our flip
+    // was there, whichever window level (test bench, 2 Nov).
+    static bool alwaysFlip;
 
     // Frame inserted between the question and the request (the command
     // station frame: 9 + 6 + 32 + 16 + 8 = 71 bits), at most
