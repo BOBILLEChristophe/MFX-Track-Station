@@ -108,5 +108,6 @@ private:
     static void statusDataAnswer();
     static void sendLocoList();
     static void sendMs2Conf();
+    static bool busConfigRequest();
     static void traceUnknown();
 };

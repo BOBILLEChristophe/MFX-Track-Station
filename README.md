@@ -141,6 +141,7 @@ La centrale a aussi le bus CAN Märklin (250 kbit/s) de la Box : RX sur GPIO 4, 
 - chaque trame de Rocrail est recopiée sur le bus, chaque trame du bus est transmise à Rocrail ;
 - la centrale exécute les ordres venus de l'un ou de l'autre (vitesse, sens, fonctions, arrêt et marche), et y répond comme une Gleisbox : un ordre est confirmé, une question reçoit l'état de la locomotive ;
 - elle ne répond pas aux demandes de fichiers de configuration venues du bus : c'est le maître (Rocrail) qui en a la charge. Exception, à l'essai : la demande « ms2-conf » d'une MS2 en esclave, à laquelle la centrale répond elle-même dans le format de can2udp (la réponse de Rocrail est refusée par la MS2) ; `Message::setAnswerMs2Conf(false)` rend la main à Rocrail.
+- à l'essai aussi (`Message::setSimulateGui`) : comme le serveur MäCAN en maître, la centrale envoie toutes les 10 s un ping et la réponse d'une interface de CS2 (type FFFF), pour que la MS2 suive une Central Station ; elle lui répond « loknamen » et « lokinfo » avec ses propres locomotives. Les réponses de Rocrail à la MS2 restent alors hors du bus.
 
 Rocrail reste le maître : la MS2 doit être en esclave. Le journal série affiche chaque trame reçue du bus (lignes `CAN:`, sans les pings) ; `Message::setBusTrace(false)` les supprime. La bibliothèque est ACAN_ESP32 de Pierre Molinaro, version 1.1.2 (les versions 1.2 et suivantes demandent le cœur Arduino 3).
 

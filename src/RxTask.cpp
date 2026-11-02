@@ -42,6 +42,23 @@ static void traceBusFrame(const uint8_t *f, const char *prefix = "CAN")
     Serial.println(")");
 }
 
+// Ping answer of a CS2 GUI (type FFFF), as the MaeCAN server sends it when
+// it is the master: an MS2 then follows a Central Station
+static const uint8_t GUI_PING[13] = {0x00, 0x31, 0x03, 0x00, 8, 0, 0, 0, 0, 0, 0, 0xFF, 0xFF};
+
+// Every 10 s (as the MaeCAN server): a ping on the bus, and the answer of
+// the CS2 GUI
+static void masterPing()
+{
+    static uint32_t last = 0;
+    if (!Message::simulatesGui() || !CanBus::ready() || (last != 0 && millis() - last < 10000))
+        return;
+    last = millis() | 1;
+    static const uint8_t ping[13] = {0x00, (uint8_t)(CAN_PING << 1), 0x03, 0x00, 0, 0, 0, 0, 0, 0, 0, 0, 0};
+    CanBus::send(ping, sizeof(ping));
+    CanBus::send(GUI_PING, sizeof(GUI_PING));
+}
+
 void rxTask(void *pvParameters)
 {
     static uint8_t busFrame[13];
@@ -52,13 +69,19 @@ void rxTask(void *pvParameters)
         while (readRocrailFrame(rxBuffer, BUFFER_S))
         {
             const uint8_t cmd = (uint8_t)(rxBuffer[1] >> 1);
-            // Test: "ms2-conf" is answered by the command station; the answer
-            // of Rocrail (the request echoed, then its stream) stays off the bus
+            // Test: the requests of the MS2 are answered by the command
+            // station; the answers of Rocrail (requests echoed, streams) and
+            // its ping answer (an MS2 of UID 0) stay off the bus
+            bool keep = true;
             if (cmd == 0x20 && (rxBuffer[1] & 1) && memcmp(rxBuffer + 5, "ms2-conf", 8) == 0)
                 dropStream = Message::answersMs2Conf();
+            else if (cmd == 0x20 && (rxBuffer[1] & 1))
+                dropStream = Message::simulatesGui();
             else if (cmd != 0x21)
                 dropStream = false;
-            if (!dropStream)
+            if (cmd == CAN_PING && (rxBuffer[1] & 1) && Message::simulatesGui())
+                keep = false;
+            if (keep && !dropStream)
             {
                 CanBus::send(rxBuffer, BUFFER_S);
                 // Configuration files sent by Rocrail (to an MS2): every frame
@@ -80,8 +103,7 @@ void rxTask(void *pvParameters)
             if (Message::simulatesGui() && busFrame[1] == ((CAN_PING << 1) | 1) && busFrame[4] == 8 &&
                 (type & 0xFFF0) == 0x0030)
             {
-                static const uint8_t gui[13] = {0x00, 0x31, 0x47, 0x11, 8, 0, 0, 0, 0, 3, 8, 0xFF, 0xFF};
-                CanBus::send(gui, sizeof(gui));
+                CanBus::send(GUI_PING, sizeof(GUI_PING));
                 static bool told = false;
                 if (!told)
                     Serial.println("CAN: ping answer of a CS2 GUI sent (the MS2 should follow a Central Station)");
@@ -93,6 +115,7 @@ void rxTask(void *pvParameters)
             Message::parse();
         }
         Message::fromBus = false;
+        masterPing();
         vTaskDelay(5 / portTICK_PERIOD_MS); // Avoid busy-waiting
     }
 }
