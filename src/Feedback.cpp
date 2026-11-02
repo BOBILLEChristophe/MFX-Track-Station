@@ -367,8 +367,10 @@ bool Feedback::ask(const MfxFrame &frame, Result *result)
 
     // An answer: many intervals of one carrier period in the answer window,
     // clearly more than in the reference window (no answer expected there)
-    r.answered = done && r.windowRegular >= ANSWER_MIN_REGULAR &&
-                 r.windowRegular >= r.referenceRegular + ANSWER_MARGIN;
+    r.answered = done && ((r.windowRegular >= ANSWER_MIN_REGULAR &&
+                           r.windowRegular >= r.referenceRegular + ANSWER_MARGIN) ||
+                          (r.windowRun >= ANSWER_RUN_MIN && r.windowRegular >= ANSWER_RUN_MIN_REGULAR &&
+                           r.windowRegular >= r.referenceRegular + ANSWER_RUN_MARGIN));
     if (sTraceSearch)
     {
         Serial.printf("Feedback: window %d edges (%u regular, run %u), reference %d edges (%u regular, run %u) -> %s\n",

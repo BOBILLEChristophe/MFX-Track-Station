@@ -27,7 +27,12 @@ static uint8_t knownAddresses(uint16_t *out, uint8_t max)
 
 static const uint32_t PERIOD_MS = 2000;        // search for new decoders
 static const uint32_t SAME_DECODER_MS = 30000; // pause if a decoder answers again
-static const uint8_t TRIES = 2;                // a missed answer gives a wrong bit
+static const uint8_t TRIES = 4;                // a missed answer gives a wrong bit
+// Pause before asking again a question without answer: the 040 DE (ESU)
+// stays silent to about one question in three, in a regular pattern, and
+// a question asked again 30 ms later was lost as well (test bench, 2 Nov:
+// asked again after 70 ms, it answers; never 3 silences in a row)
+static const uint32_t MISS_PAUSE_MS = 70;
 static const uint32_t POWERED_MS = 3000;       // track on before reading the configurations
 static const uint32_t RETRY_MS = 20000;        // a decoder that did not answer is tried again
 
@@ -43,8 +48,9 @@ void Discovery::setup()
 
 /*
  Search: do decoders not yet registered have a UID starting with the first
- `count` bits of `uid`? A "no" is asked twice: one missed answer would give
- a wrong bit (the final check would then fail, and the search restart).
+ `count` bits of `uid`? A "no" is asked TRIES times, MISS_PAUSE_MS apart:
+ one missed answer would give a wrong bit (the final check would then fail,
+ and the search restart).
 
  After an answer, the next question waits ANSWER_PAUSE_MS, as the Gleisbox
  does (130 to 175 ms measured, October 2026; 38 ms only after a "no"): an
@@ -52,8 +58,21 @@ void Discovery::setup()
  30 ms later, which made the search lose a bit every time.
 */
 static const uint32_t ANSWER_PAUSE_MS = 150;
-// Presence: a weak answer counts too (see verifyNext())
+// Presence: a weak answer counts too (see verifyNext()): a locomotive that
+// runs answers with 34 to 148 regular intervals (its own motor spoils its
+// answer, test bench 2 Nov), the reference window holding at most 22; a
+// locomotive taken off the track gives at most 4, even with another one
+// running fast with its sounds.
 static const uint16_t WEAK_ANSWER_REGULAR = 20;
+static const uint16_t WEAK_ANSWER_MARGIN = 10; // more than in the reference window
+// A reference window with this many regular intervals: the measure is not
+// reliable, a missing answer is not counted against the locomotive
+static const uint16_t NOISY_REFERENCE = 10;
+
+static bool weakAnswer(const Feedback::Result &r)
+{
+    return r.windowRegular >= WEAK_ANSWER_REGULAR && r.windowRegular >= r.referenceRegular + WEAK_ANSWER_MARGIN;
+}
 
 bool Discovery::probe(uint8_t count, uint32_t uid)
 {
@@ -62,11 +81,15 @@ bool Discovery::probe(uint8_t count, uint32_t uid)
     f.search(count, uid);
     f.finish();
     for (uint8_t i = 0; i < TRIES; i++)
+    {
         if (Feedback::ask(f))
         {
             vTaskDelay(pdMS_TO_TICKS(ANSWER_PAUSE_MS));
             return true;
         }
+        if (i + 1 < TRIES)
+            vTaskDelay(pdMS_TO_TICKS(MISS_PAUSE_MS));
+    }
     return false;
 }
 
@@ -477,7 +500,7 @@ static void benchAsk(const MfxFrame &f, const char *what, uint16_t n, uint32_t p
     {
         Feedback::Result r = {};
         const bool yes = Feedback::ask(f, &r);
-        const bool w = !yes && r.windowRegular >= WEAK_ANSWER_REGULAR;
+        const bool w = !yes && weakAnswer(r);
         answers += yes;
         weak += w;
         if (col[0])
@@ -762,7 +785,7 @@ static void verifyNext()
         // Presence only: a weak answer counts too (the 241 A answers some
         // queries with 64 or 105 edges instead of 300, 1 Nov; the noise
         // gives at most 5 regular intervals)
-        const bool yes = Feedback::ask(f, &r) || r.windowRegular >= WEAK_ANSWER_REGULAR;
+        const bool yes = Feedback::ask(f, &r) || weakAnswer(r);
         if (yes)
         {
             if (p.absent)
@@ -773,6 +796,8 @@ static void verifyNext()
         }
         else if (p.absent)
             p.since = now;
+        else if (r.referenceRegular >= NOISY_REFERENCE)
+            ; // the reference window is noisy: no conclusion, asked again next turn
         else if (++p.misses >= ABSENT_MISSES)
         {
             Serial.printf("Discovery: %s (address %u) does not answer, queried again every minute\n",
@@ -854,6 +879,15 @@ static void readForMaster(const MasterOrder &o)
         readFailed(o, 0);
         return;
     }
+    // A running locomotive cannot be read: its own motor spoils its answer
+    // (test bench, 2 Nov: 0 reads out of 10, at speed 12 and 63)
+    if (Loco *running = Loco::findLoco(o.sid))
+        if (running->speed() != 0)
+        {
+            Serial.printf("Discovery: read of CV %u at address %u refused: the locomotive is running\n", o.cv, o.sid);
+            readFailed(o, 0);
+            return;
+        }
     // The name of the decoder (CV 3, index 1, 16 characters), read by the
     // master: kept as the name of the locomotive (shown on an MS2)
     const bool isName = (o.cv == 3 && o.index == 1 && o.count >= 2 && o.count <= 16);

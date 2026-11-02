@@ -67,6 +67,12 @@ public:
     // intervals in both windows; their difference stayed below 60.
     static const uint16_t ANSWER_MIN_REGULAR = 150; // in the answer window
     static const uint16_t ANSWER_MARGIN = 120;      // more than in the reference
+    // Or an answer spoilt by the noise of another locomotive (116 regular
+    // intervals, 2 Nov): one long run of carrier periods, which the noise
+    // never gives (4 at most measured, motors and sounds, 2 Nov)
+    static const uint16_t ANSWER_RUN_MIN = 15;         // consecutive regular intervals
+    static const uint16_t ANSWER_RUN_MIN_REGULAR = 80;
+    static const uint16_t ANSWER_RUN_MARGIN = 60;
 
     // Pause between two reads of CVs (Krauss 4.9: about 120 ms for the
     // first ESU decoders), in ms
