@@ -13,6 +13,7 @@
 #include "MfxConfig.h"
 #include "Cs2Config.h"
 #include "LocoStore.h"
+#include "MfxSignal.h"
 #include <unordered_map>
 
 // Addresses of the known locomotives, sorted (at most max)
@@ -778,13 +779,35 @@ static void console()
             else
                 benchSearch(uid, n ? n : 50, pause);
         }
+        else if (c == 'F')
+        {
+            // Test: F<µs> = flip before the answer window after this time
+            // (2 = as the Gleisbox was measured), F0 = no flip
+            vTaskDelay(pdMS_TO_TICKS(50));
+            uint16_t us = 0;
+            bool digits = false;
+            while (Serial.available() > 0 && isdigit(Serial.peek()))
+            {
+                us = us * 10 + (Serial.read() - '0');
+                digits = true;
+            }
+            if (!digits)
+                Serial.printf("\nF: F followed by the time in µs (F2 = default, F0 = no flip), now %u\n",
+                              MfxSignal::answerFlipUs);
+            else
+            {
+                MfxSignal::answerFlipUs = us;
+                Serial.printf("\nFlip before the answer window: %s %u µs\n", us ? "after" : "none", us);
+            }
+        }
         else if (c == '?')
             Serial.printf("\nCommands: R = re-registration of every decoder (counter %u -> %u, restart), "
                           "V = verify every declared locomotive, L = list the locomotives, C = read the configurations again, "
                           "D<address> = delete one locomotive (D4), M<address>[,n] = test bench, n verifies (M404,50), "
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
                           "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "
-                          "T<UID>[,1] = test bench, search questions for every count (,1: other bits at 1), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "T<UID>[,1] = test bench, search questions for every count (,1: other bits at 1), "
+                          "F<us> = flip before the answer window (F2 default, F0 none), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }

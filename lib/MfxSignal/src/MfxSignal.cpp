@@ -5,6 +5,7 @@
 #include "MfxSignal.h"
 
 bool MfxSignal::windowLevel = true;
+uint16_t MfxSignal::answerFlipUs = MfxSignal::FORCE_US;
 
 void MfxSignal::push(bool level0, bool level1, uint16_t duration0, uint16_t duration1)
 {
@@ -49,14 +50,15 @@ void MfxSignal::request(const uint8_t *insert)
     bit0();
     bit1();
     bit1();
-    forceLevel(windowLevel);
+    if (answerFlipUs != 0)
+        forceLevel(windowLevel, answerFlipUs);
 }
 
-void MfxSignal::forceLevel(bool level)
+void MfxSignal::forceLevel(bool level, uint16_t delayUs)
 {
     if (mLevel == level)
         return;
-    push(mLevel, level, FORCE_US, FORCE_US);
+    push(mLevel, level, delayUs, FORCE_US);
     mLevel = level;
 }
 
