@@ -505,8 +505,11 @@ static void benchAsk(const MfxFrame &f, const char *what, uint16_t n, uint32_t p
     for (uint8_t k = 0; k < 6; k++)
         col[k] = (uint16_t *)malloc(n * sizeof(uint16_t));
     uint16_t answers = 0, weak = 0;
-    Serial.printf("\nBench: %u %s, %lu ms between two questions\n", n, what, (unsigned long)pauseMs + 30);
-    Serial.println("  #   window edges/regular/run   reference edges/regular/run   decision");
+    uint16_t ends[3] = {0, 0, 0}, endAnswers[3] = {0, 0, 0}; // per end of the request
+    static const char *const END_NAMES[3] = {"none ", "flip ", "pulse"};
+    Serial.printf("\nBench: %u %s, %lu ms between two questions, pulse %u us%s\n", n, what,
+                  (unsigned long)pauseMs + 30, MfxSignal::pulseUs, MfxSignal::answerPulse ? "" : " (off)");
+    Serial.println("  #   window edges/regular/run   reference edges/regular/run   end    decision");
     for (uint16_t i = 0; i < n; i++)
     {
         Feedback::Result r = {};
@@ -523,12 +526,18 @@ static void benchAsk(const MfxFrame &f, const char *what, uint16_t n, uint32_t p
             col[4][i] = r.referenceRegular;
             col[5][i] = r.referenceRun;
         }
-        Serial.printf("  %3u   %4d / %3u / %3u           %4d / %3u / %3u            %s\n", i + 1, r.window,
+        const uint8_t end = MfxSignal::lastEnd < 3 ? MfxSignal::lastEnd : 0;
+        ends[end]++;
+        endAnswers[end] += yes;
+        Serial.printf("  %3u   %4d / %3u / %3u           %4d / %3u / %3u            %s  %s\n", i + 1, r.window,
                       r.windowRegular, r.windowRun, r.reference, r.referenceRegular, r.referenceRun,
-                      yes ? "answer" : w ? "weak (counted as present)" : "no answer");
+                      END_NAMES[end], yes ? "answer" : w ? "weak (counted as present)" : "no answer");
         vTaskDelay(pdMS_TO_TICKS(pauseMs));
     }
     Serial.printf("Bench: %u answers, %u weak, %u no answer, out of %u\n", answers, weak, n - answers - weak, n);
+    for (uint8_t e = 0; e < 3; e++)
+        if (ends[e])
+            Serial.printf("  end %s: %u answers out of %u\n", END_NAMES[e], endAnswers[e], ends[e]);
     if (col[0] && col[5])
     {
         printStats("window edges", col[0], n);
@@ -806,6 +815,26 @@ static void console()
             Serial.printf("\nPulse after the bits 0011 when they end at the window level: %s\n",
                           MfxSignal::answerPulse ? "on (as the Gleisbox, default)" : "off");
         }
+        else if (c == 'I')
+        {
+            // Test: I<µs> = length of the pulse after 0011 (I2 = Gleisbox)
+            vTaskDelay(pdMS_TO_TICKS(50));
+            uint16_t us = 0;
+            bool digits = false;
+            while (Serial.available() > 0 && isdigit(Serial.peek()))
+            {
+                us = us * 10 + (Serial.read() - '0');
+                digits = true;
+            }
+            if (!digits || us == 0 || us > 100)
+                Serial.printf("\nI: I followed by the pulse length in µs, 1 to 100 (I2 = default), now %u\n",
+                              MfxSignal::pulseUs);
+            else
+            {
+                MfxSignal::pulseUs = us;
+                Serial.printf("\nPulse after the bits 0011: %u µs\n", us);
+            }
+        }
         else if (c == 'F')
         {
             // Test: F<µs> = flip before the answer window after this time
@@ -834,7 +863,7 @@ static void console()
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
                           "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "
                           "T<UID>[,1] = test bench, search questions for every count (,1: other bits at 1), "
-                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I2 default), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }

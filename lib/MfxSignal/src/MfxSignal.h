@@ -88,6 +88,13 @@ public:
     // 040 DE (ESU) answers only with this transition, the 150 X 1518 and the
     // 150 Y only at windowLevel. Serial command A switches it off and on.
     static bool answerPulse;
+    // Test (serial command I): length of that pulse in µs (2 as measured on
+    // the Gleisbox, which an H-bridge may not reproduce as well)
+    static uint16_t pulseUs;
+    // How the last request ended (test bench): bits 0011 followed by a
+    // pulse, by one flip, or by nothing
+    enum : uint8_t { END_NONE, END_FLIP, END_PULSE };
+    static volatile uint8_t lastEnd;
 
     // Frame inserted between the question and the request (the command
     // station frame: 9 + 6 + 32 + 16 + 8 = 71 bits), at most

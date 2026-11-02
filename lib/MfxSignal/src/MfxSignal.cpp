@@ -7,6 +7,8 @@
 bool MfxSignal::windowLevel = true;
 uint16_t MfxSignal::answerFlipUs = MfxSignal::FORCE_US;
 bool MfxSignal::answerPulse = true;
+uint16_t MfxSignal::pulseUs = MfxSignal::FORCE_US;
+volatile uint8_t MfxSignal::lastEnd = MfxSignal::END_NONE;
 
 void MfxSignal::push(bool level0, bool level1, uint16_t duration0, uint16_t duration1)
 {
@@ -55,10 +57,16 @@ void MfxSignal::request(const uint8_t *insert)
     {
         // Already at the window level: a short pulse at the other level all
         // the same, so that a transition follows the bits 0011 (Gleisbox)
-        push(mLevel, !mLevel, FORCE_US, FORCE_US);
+        push(mLevel, !mLevel, FORCE_US, pulseUs);
+        lastEnd = END_PULSE;
     }
-    else if (answerFlipUs != 0)
+    else if (answerFlipUs != 0 && mLevel != windowLevel)
+    {
         forceLevel(windowLevel, answerFlipUs);
+        lastEnd = END_FLIP;
+    }
+    else
+        lastEnd = END_NONE;
 }
 
 void MfxSignal::forceLevel(bool level, uint16_t delayUs)
