@@ -79,6 +79,10 @@ void rxTask(void *pvParameters)
                 dropStream = Message::simulatesGui();
             else if (cmd != 0x21)
                 dropStream = false;
+            // Rocrail also sends streams without echo (its loco names):
+            // the command station is the only one to answer the MS2
+            if (cmd == 0x21 && Message::simulatesGui())
+                dropStream = true;
             if (cmd == CAN_PING && (rxBuffer[1] & 1) && Message::simulatesGui())
                 keep = false;
             if (keep && !dropStream)

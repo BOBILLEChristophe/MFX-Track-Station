@@ -272,8 +272,17 @@ void Message::parse()
             break;
         case 0x02: // System Halt : à implémenter (étape 3)
             break;
-        case 0x03: // Arrêt d'urgence de la locomotive : à implémenter (étape 3)
+        case 0x03: // emergency stop of one locomotive (MS2: stop key)
+        {
+            const uint16_t locId = (uint16_t)data[2] << 8 | data[3];
+            if (locId >= 0x4000 && locId < 0x8000)
+                if (Loco *l = Loco::findLoco(locId - 0x4000))
+                {
+                    l->speed(0);
+                    sendNow(l);
+                }
             break;
+        }
         case 0x09: // re-registration counter, set by the master (MS2: at power on)
             if (length >= 7)
             {
@@ -523,7 +532,8 @@ void Message::systemAnswer()
 {
     const uint32_t own = Centrale::gUid();
     const uint32_t to = (uint32_t)data[0] << 24 | (uint32_t)data[1] << 16 | (uint32_t)data[2] << 8 | data[3];
-    if (to != 0 && to != own)
+    // Emergency stop of a locomotive (0x03): the UID field is the loco id
+    if (to != 0 && to != own && !(length >= 5 && data[4] == 0x03))
         return;
     uint8_t d[8];
     memcpy(d, data, 8);
@@ -533,6 +543,7 @@ void Message::systemAnswer()
     case 0x00: // STOP
     case 0x01: // GO
     case 0x02: // halt
+    case 0x03: // emergency stop of a locomotive (recorded: echoed by the Gleisbox)
     case 0x08: // track protocols
     case 0x09: // re-registration counter
         break;
@@ -801,9 +812,10 @@ bool Message::busConfigRequest()
             snprintf(line, sizeof(line), " .fkt\n ..nr=%u\n ..typ=%u\n ..wert=%u\n", f, type, l.funct(f) ? 1 : 0);
             t += line;
         }
+        const uint16_t addr = l.addr();
         delete[] copies;
         streamToBus(t.c_str(), t.length(), hash);
-        Serial.printf("CAN: lokinfo \"%s\" sent to the MS2 (address %u, %u bytes)\n", infoName, l.addr(),
+        Serial.printf("CAN: lokinfo \"%s\" sent to the MS2 (address %u, %u bytes)\n", infoName, addr,
                       (unsigned)t.length());
         return true;
     }

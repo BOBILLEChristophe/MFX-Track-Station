@@ -655,6 +655,11 @@ static void readForMaster(const MasterOrder &o)
         readFailed(o, 0);
         return;
     }
+    // The name of the decoder (CV 3, index 1, 16 characters), read by the
+    // master: kept as the name of the locomotive (shown on an MS2)
+    const bool isName = (o.cv == 3 && o.index == 1 && o.count >= 2 && o.count <= 16);
+    char name[17];
+    memset(name, 0, sizeof(name));
     uint8_t done = 0;
     while (done < o.count)
     {
@@ -674,8 +679,23 @@ static void readForMaster(const MasterOrder &o)
             const uint8_t d[7] = {(uint8_t)(o.uid >> 24), (uint8_t)(o.uid >> 16), (uint8_t)(o.uid >> 8),
                                   (uint8_t)o.uid, (uint8_t)(ic >> 8), (uint8_t)ic, v[k]};
             Message::answer(CAN_READ_CONFIG, 7, d);
+            if (isName)
+                name[done + k] = (char)v[k];
         }
         done += n;
+    }
+    if (isName && name[0] >= 0x20)
+    {
+        bool printable = true;
+        for (uint8_t i = 0; name[i]; i++)
+            printable = printable && name[i] >= 0x20 && name[i] < 0x7F;
+        Loco *l = Loco::findLoco(o.sid);
+        if (printable && l != nullptr && l->name() != String(name))
+        {
+            Serial.printf("Discovery: locomotive %u named \"%s\" (read in the decoder)\n", o.sid, name);
+            l->name(String(name));
+            LocoStore::save();
+        }
     }
     Serial.printf("Discovery: CV %u index %u..%u at address %u read for the master\n", o.cv, o.index,
                   o.index + o.count - 1, o.sid);
