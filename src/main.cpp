@@ -32,6 +32,7 @@
 #include "RxTask.h"
 #include "CanBus.h"
 #include "MfxRMT.h"
+#include "MfxSignal.h"
 
 // Central system ID used for identification
 const uint32_t idCentrale = 0x476bb7dc;
@@ -259,6 +260,13 @@ void setup()
   // CV (DATA), or both (BOTH). SCOPE_OFF: pin not used.
   // Third parameter: only the reads of this address (0: every address).
   Feedback::setScope(GPIO_NUM_25, Feedback::SCOPE_OFF);
+
+  // A transition right after the bits 0011 of every feedback request (the
+  // answer window then takes the level the frame gives). Without it, the
+  // 040 DE (ESU) did not answer the frames with an odd number of stuffed
+  // bits: its search stopped at bit 8 (test bench, 2 Nov). Serial command A
+  // switches it off and on.
+  MfxSignal::alwaysFlip = true;
 
   // Initialize RMTChannel
   RMTChannel::setup(IN1_pin, IN2_pin);
