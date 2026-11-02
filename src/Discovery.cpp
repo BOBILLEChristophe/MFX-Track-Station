@@ -114,7 +114,14 @@ bool Discovery::findUid(uint32_t *found)
             continue; // the bit is 1
         uid &= ~(1UL << (32 - count));
         if (!probe(count, uid))
-            return false; // neither 1 nor 0: start again
+        {
+            // neither 1 nor 0: start again (printed, to follow a decoder
+            // that does not complete its search)
+            const uint32_t known = count > 1 ? uid & ~((1UL << (33 - count)) - 1) : 0;
+            Serial.printf("Discovery: search stopped at bit %u (UID so far %08lX, %u bits)\n", count,
+                          (unsigned long)known, count - 1);
+            return false;
+        }
     }
     *found = uid;
     return true;
