@@ -1000,8 +1000,38 @@ static void readFailed(const MasterOrder &o, uint8_t from)
     }
 }
 
+/*
+ Registration by the master, end. After the bind, Rocrail reads the name and
+ CVs 2 to 70, then asks a verify; the answer makes it create the locomotive
+ in its list. With the ESU decoders (040 DE, Serie 150X) it never asked the
+ verify (2 Nov 2026, 3 tries each), with the Marklin 241 A it always did:
+ the decision is in Rocrail. When the master bound a decoder, read it and
+ asked nothing more for PENDING_VERIFY_MS, the command station verifies the
+ decoder itself and gives the answer to the master, as if it had asked.
+ Rocrail then creates the locomotive (or finds it by its address).
+*/
+static const uint32_t PENDING_VERIFY_MS = 8000;
+static struct
+{
+    bool active;
+    bool read; // the master read at least one CV since the bind
+    uint32_t uid;
+    uint16_t sid;
+    uint32_t last; // millis() of the last order of the master for it
+} sPending = {};
+
+static void pendingTouch(uint16_t sid)
+{
+    if (sPending.active && sPending.sid == sid)
+    {
+        sPending.last = millis();
+        sPending.read = true;
+    }
+}
+
 static void readForMaster(const MasterOrder &o)
 {
+    pendingTouch(o.sid);
     // Address 0 is the broadcast: every decoder would answer together
     if (o.sid == 0)
     {
@@ -1115,9 +1145,12 @@ void Discovery::masterOrders()
             Message::answer(CAN_MFX_BIND, 6, d);
             Serial.printf("Discovery: bind of %08lX at address %u by the master, done\n", (unsigned long)o.uid,
                           o.sid);
+            sPending = {true, false, o.uid, o.sid, millis()};
             continue;
         }
         // verify
+        if (sPending.active && sPending.uid == o.uid)
+            sPending.active = false; // asked by the master: nothing to add
         MfxFrame f;
         f.address(o.sid);
         f.verify(o.uid);
@@ -1151,6 +1184,37 @@ void Discovery::masterOrders()
         }
         Serial.printf("Discovery: verify of %08lX at address %u by the master: %s (%u regular intervals)\n",
                       (unsigned long)o.uid, o.sid, yes ? "answer" : "no answer", r.windowRegular);
+    }
+
+    // The master read the decoder it bound, then stopped without a verify
+    if (sPending.active && sPending.read && millis() - sPending.last >= PENDING_VERIFY_MS)
+    {
+        sPending.active = false;
+        if (!Centrale::power())
+            return;
+        MfxFrame f;
+        f.address(sPending.sid);
+        f.verify(sPending.uid);
+        f.finish();
+        bool yes = false;
+        Feedback::Result r = {};
+        for (uint8_t t = 0; t < TRIES && !yes; t++)
+        {
+            yes = Feedback::ask(f, &r) || r.windowRegular >= 20;
+            if (!yes)
+                vTaskDelay(pdMS_TO_TICKS(MISS_PAUSE_MS));
+        }
+        if (yes)
+        {
+            const uint8_t d[7] = {(uint8_t)(sPending.uid >> 24), (uint8_t)(sPending.uid >> 16),
+                                  (uint8_t)(sPending.uid >> 8), (uint8_t)sPending.uid,
+                                  (uint8_t)(sPending.sid >> 8), (uint8_t)sPending.sid, 0xFF};
+            Message::answer(CAN_MFX_VERIFY, 7, d);
+        }
+        Serial.printf("Discovery: %08lX at address %u read by the master, which asked no verify: %s\n",
+                      (unsigned long)sPending.uid, sPending.sid,
+                      yes ? "verified here, answer sent to the master (it creates the locomotive)"
+                          : "no answer on the track, nothing sent");
     }
 }
 
