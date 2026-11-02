@@ -52,6 +52,8 @@ void Discovery::setup()
  30 ms later, which made the search lose a bit every time.
 */
 static const uint32_t ANSWER_PAUSE_MS = 150;
+// Presence: a weak answer counts too (see verifyNext())
+static const uint16_t WEAK_ANSWER_REGULAR = 20;
 
 bool Discovery::probe(uint8_t count, uint32_t uid)
 {
@@ -437,6 +439,109 @@ static void deleteLoco(uint16_t a)
                   Centrale::power() ? "" : " (track off: its decoder keeps the address until the counter changes)");
 }
 
+/*
+ Test bench for the feedback (serial commands M and N): the same requests
+ as in service, repeated, with the counts of each window, to measure what
+ the noise of other locomotives (motors, sounds) does to the answers of
+ this one. Run it with the locomotive on the track (no answer must be
+ missed) and taken off (no answer must be seen).
+*/
+static void printStats(const char *what, uint16_t *v, uint16_t n)
+{
+    // sorted for the median (insertion sort, n <= 500)
+    for (uint16_t i = 1; i < n; i++)
+    {
+        const uint16_t x = v[i];
+        int j = i - 1;
+        while (j >= 0 && v[j] > x)
+        {
+            v[j + 1] = v[j];
+            j--;
+        }
+        v[j + 1] = x;
+    }
+    Serial.printf("  %-22s min %3u  median %3u  max %3u\n", what, v[0], v[n / 2], v[n - 1]);
+}
+
+static void benchVerify(uint16_t a, uint16_t n)
+{
+    Loco *l = Loco::findLoco(a);
+    if (n > 500)
+        n = 500;
+    uint16_t *col[6];
+    for (uint8_t k = 0; k < 6; k++)
+        col[k] = (uint16_t *)malloc(n * sizeof(uint16_t));
+    uint16_t answers = 0, weak = 0;
+    Serial.printf("\nBench: %u verifies of %s (address %u)\n", n, l->name().c_str(), a);
+    Serial.println("  #   window edges/regular/run   reference edges/regular/run   decision");
+    for (uint16_t i = 0; i < n; i++)
+    {
+        MfxFrame f;
+        f.address(a);
+        f.verify(l->uid32());
+        f.finish();
+        Feedback::Result r = {};
+        const bool yes = Feedback::ask(f, &r);
+        const bool w = !yes && r.windowRegular >= WEAK_ANSWER_REGULAR;
+        answers += yes;
+        weak += w;
+        if (col[0])
+        {
+            col[0][i] = r.window < 0 ? 0 : r.window;
+            col[1][i] = r.windowRegular;
+            col[2][i] = r.windowRun;
+            col[3][i] = r.reference < 0 ? 0 : r.reference;
+            col[4][i] = r.referenceRegular;
+            col[5][i] = r.referenceRun;
+        }
+        Serial.printf("  %3u   %4d / %3u / %3u           %4d / %3u / %3u            %s\n", i + 1, r.window,
+                      r.windowRegular, r.windowRun, r.reference, r.referenceRegular, r.referenceRun,
+                      yes ? "answer" : w ? "weak (counted as present)" : "no answer");
+        vTaskDelay(pdMS_TO_TICKS(ANSWER_PAUSE_MS));
+    }
+    Serial.printf("Bench: %u answers, %u weak, %u no answer, out of %u\n", answers, weak, n - answers - weak, n);
+    if (col[0] && col[5])
+    {
+        printStats("window edges", col[0], n);
+        printStats("window regular", col[1], n);
+        printStats("window longest run", col[2], n);
+        printStats("reference edges", col[3], n);
+        printStats("reference regular", col[4], n);
+        printStats("reference longest run", col[5], n);
+    }
+    for (uint8_t k = 0; k < 6; k++)
+        free(col[k]);
+}
+
+static void benchRead(uint16_t a, uint16_t n)
+{
+    Loco *l = Loco::findLoco(a);
+    if (n > 100)
+        n = 100;
+    uint16_t ok = 0;
+    Serial.printf("\nBench: %u reads of the name of %s (address %u)\n", n, l->name().c_str(), a);
+    for (uint16_t i = 0; i < n; i++)
+    {
+        char name[17];
+        memset(name, 0, sizeof(name));
+        bool good = true;
+        for (uint8_t k = 0; k < 16 && good; k += 2)
+        {
+            uint8_t v[2] = {0, 0};
+            good = Feedback::readCV(a, 3, 1 + k, 2, v);
+            name[k] = (char)v[0];
+            name[k + 1] = (char)v[1];
+            vTaskDelay(pdMS_TO_TICKS(Feedback::READ_PAUSE_MS));
+        }
+        for (uint8_t k = 0; k < 16; k++)
+            if (name[k] != 0 && (name[k] < 0x20 || name[k] >= 0x7F))
+                name[k] = '?';
+        ok += good;
+        Serial.printf("  %3u  %s  \"%s\"\n", i + 1, good ? "ok    " : "failed", good ? name : "");
+    }
+    Serial.printf("Bench: %u reads ok out of %u\n", ok, n);
+}
+
 static void console()
 {
     while (Serial.available() > 0)
@@ -507,10 +612,39 @@ static void console()
             else
                 deleteLoco(a);
         }
+        else if (c == 'M' || c == 'N')
+        {
+            // Test bench: M<address>[,count] = count verifies (50), N<address>[,count]
+            // = count reads of the name (10); statistics of the feedback
+            vTaskDelay(pdMS_TO_TICKS(50)); // the rest of the line
+            uint16_t a = 0, n = 0;
+            bool digits = false;
+            while (Serial.available() > 0 && isdigit(Serial.peek()))
+            {
+                a = a * 10 + (Serial.read() - '0');
+                digits = true;
+            }
+            if (Serial.available() > 0 && Serial.peek() == ',')
+            {
+                Serial.read();
+                while (Serial.available() > 0 && isdigit(Serial.peek()))
+                    n = n * 10 + (Serial.read() - '0');
+            }
+            if (!digits || Loco::findLoco(a) == nullptr)
+                Serial.printf("\n%c: %c followed by the address of a known locomotive (L lists them), %c404 or %c404,100\n",
+                              c, c, c, c);
+            else if (!Centrale::power())
+                Serial.println("\nTest bench: the track is off");
+            else if (c == 'M')
+                benchVerify(a, n ? n : 50);
+            else
+                benchRead(a, n ? n : 10);
+        }
         else if (c == '?')
             Serial.printf("\nCommands: R = re-registration of every decoder (counter %u -> %u, restart), "
                           "V = verify every declared locomotive, L = list the locomotives, C = read the configurations again, "
-                          "D<address> = delete one locomotive (D4), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "D<address> = delete one locomotive (D4), M<address>[,n] = test bench, n verifies (M404,50), "
+                          "N<address>[,n] = test bench, n reads of the name (N404,10), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }
@@ -532,7 +666,6 @@ static void console()
 */
 static const uint32_t ABSENT_RETRY_MS = 60000;
 static const uint8_t ABSENT_MISSES = 3;
-static const uint16_t WEAK_ANSWER_REGULAR = 20;
 
 static void verifyNext()
 {

@@ -52,6 +52,9 @@ public:
         // edges: about 300 for an answer, few for the noise of a motor
         uint16_t windowRegular;
         uint16_t referenceRegular;
+        // Longest run of consecutive regular intervals in each window
+        uint16_t windowRun;
+        uint16_t referenceRun;
         bool answered;
     };
 
