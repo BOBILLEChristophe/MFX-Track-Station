@@ -6,6 +6,7 @@
 */
 
 #include "Message.h"
+#include "CanBus.h"
 #include "Centrale.h"
 #include "MfxFrame.h"
 #include "Cs2Config.h"
@@ -26,6 +27,7 @@ uint8_t Message::response = 0;
 uint16_t Message::hash = 0;
 bool Message::fromBus = false;
 bool Message::traceBus = true;
+bool Message::answerMs2Conf = true;
 uint8_t Message::data[8] = {0};
 byte Message::buff[BUFF_MSG_SIZE] = {0};
 
@@ -223,6 +225,11 @@ void Message::parse()
             char name[9];
             memcpy(name, data, 8);
             name[8] = 0;
+            if (answerMs2Conf && strcmp(name, "ms2-conf") == 0)
+            {
+                sendMs2Conf();
+                return;
+            }
             Serial.printf("CAN: a device asks Rocrail for the configuration \"%s\"\n", name);
             return;
         }
@@ -621,6 +628,40 @@ void Message::configRequest()
 
     if (strcmp(name, "loks") == 0)
         sendLocoList();
+}
+
+/*
+ Answer to "ms2-conf" (an MS2 in slave mode asks it to its master), as
+ can2udp (ms2-loco-list.c, G. Bertelsmann) does: the request with the
+ response bit, then the plain text in a config data stream with the hash of
+ the MS2. Length without the padding, CRC with it. Sent on the bus only.
+ Rocrail answers ".magpro=0 .lokpro=7", length with the padding: the MS2
+ asks again and again.
+*/
+void Message::sendMs2Conf()
+{
+    static const char text[] = "[config]\n .magprot=0\n .lokprot=7\n";
+    const size_t len = sizeof(text) - 1;
+    const size_t padded = (len + 7) / 8 * 8;
+    uint8_t data[48];
+    memset(data, 0, sizeof(data));
+    memcpy(data, text, len);
+    const uint16_t crc = Cs2Config::crcCcitt(data, padded, 0xFFFF);
+
+    uint8_t frame[13];
+    putFrame(frame, ((uint32_t)CAN_CONFIG_DATA << 17) | 0x00010000UL | cs2Hash(Centrale::gUid()), 8, Message::data);
+    CanBus::send(frame, 13);
+    const uint32_t streamId = ((uint32_t)CAN_CONFIG_DATA_STREAM << 17) | hash;
+    const uint8_t head[6] = {0, 0, 0, (uint8_t)len, (uint8_t)(crc >> 8), (uint8_t)crc};
+    putFrame(frame, streamId, 6, head);
+    CanBus::send(frame, 13);
+    for (size_t i = 0; i < padded; i += 8)
+    {
+        vTaskDelay(pdMS_TO_TICKS(2));
+        putFrame(frame, streamId, 8, data + i);
+        CanBus::send(frame, 13);
+    }
+    Serial.printf("CAN: \"ms2-conf\" answered by the command station (%u bytes, CRC %04X)\n", (unsigned)len, crc);
 }
 
 /*

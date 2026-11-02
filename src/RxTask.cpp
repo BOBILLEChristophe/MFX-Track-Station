@@ -28,16 +28,26 @@ static void traceBusFrame(const uint8_t *f, const char *prefix = "CAN")
 void rxTask(void *pvParameters)
 {
     static uint8_t busFrame[13];
+    bool dropStream = false; // answer of Rocrail to "ms2-conf": not sent to the bus
     while (true)
     {
         // Every complete frame of Rocrail: to the bus, then executed
         while (readRocrailFrame(rxBuffer, BUFFER_S))
         {
-            CanBus::send(rxBuffer, BUFFER_S);
-            // Configuration files sent by Rocrail (to an MS2): every frame
             const uint8_t cmd = (uint8_t)(rxBuffer[1] >> 1);
-            if (Message::busTrace() && CanBus::ready() && (cmd == 0x20 || cmd == 0x21))
-                traceBusFrame(rxBuffer, "Rocrail->CAN");
+            // Test: "ms2-conf" is answered by the command station; the answer
+            // of Rocrail (the request echoed, then its stream) stays off the bus
+            if (cmd == 0x20 && (rxBuffer[1] & 1) && memcmp(rxBuffer + 5, "ms2-conf", 8) == 0)
+                dropStream = Message::answersMs2Conf();
+            else if (cmd != 0x21)
+                dropStream = false;
+            if (!dropStream)
+            {
+                CanBus::send(rxBuffer, BUFFER_S);
+                // Configuration files sent by Rocrail (to an MS2): every frame
+                if (Message::busTrace() && CanBus::ready() && (cmd == 0x20 || cmd == 0x21))
+                    traceBusFrame(rxBuffer, "Rocrail->CAN");
+            }
             Message::fromBus = false;
             Message::decodeMsg(rxBuffer);
             Message::parse();

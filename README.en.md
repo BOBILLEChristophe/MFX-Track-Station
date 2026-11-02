@@ -140,7 +140,7 @@ The command station also has the Märklin CAN bus (250 kbit/s) of the Box: RX on
 
 - each frame of Rocrail is copied to the bus, each frame of the bus is passed to Rocrail;
 - the command station executes the orders of either side (speed, direction, functions, stop and go), and answers as a Gleisbox: an order is confirmed, a request gets the state of the locomotive;
-- it does not answer the requests for configuration files coming from the bus: the master (Rocrail) does.
+- it does not answer the requests for configuration files coming from the bus: the master (Rocrail) does. Exception, on trial: the request "ms2-conf" of an MS2 in slave mode, answered by the command station itself in the format of can2udp (the MS2 refuses the answer of Rocrail); `Message::setAnswerMs2Conf(false)` gives it back to Rocrail.
 
 Rocrail stays the master: the MS2 must be a slave. The serial log prints each frame received from the bus (lines `CAN:`, pings left out); `Message::setBusTrace(false)` turns them off. The library is ACAN_ESP32 by Pierre Molinaro, version 1.1.2 (versions 1.2 and later need the Arduino core 3).
 

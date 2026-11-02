@@ -53,6 +53,7 @@ private:
     static bool trace;         // Debug: internal tasks (very verbose)
     static bool traceCommands; // Commands received from Rocrail
     static bool traceBus;      // Frames received from the CAN bus
+    static bool answerMs2Conf; // "ms2-conf" answered by the command station
     static byte buff[BUFF_MSG_SIZE];
     static Loco **loco;
     static volatile byte locoSize; // locomotives in loco[]
@@ -75,6 +76,10 @@ public:
     // Trace of the frames received from the CAN bus (pings left out)
     static void setBusTrace(bool on) { traceBus = on; }
     static bool busTrace() { return traceBus; }
+    // Test: the command station answers itself the request "ms2-conf" of an
+    // MS2 (format of can2udp, G. Bertelsmann), instead of Rocrail
+    static void setAnswerMs2Conf(bool on) { answerMs2Conf = on; }
+    static bool answersMs2Conf() { return answerMs2Conf; }
     static void decodeMsg(byte *);
     static void parse();
     static void periodic(void *);
@@ -97,5 +102,6 @@ private:
     // As a Gleisbox: the description of the device (command 0x1D, index 0)
     static void statusDataAnswer();
     static void sendLocoList();
+    static void sendMs2Conf();
     static void traceUnknown();
 };

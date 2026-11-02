@@ -240,6 +240,9 @@ void setup()
   Message::setTrace(true);
   // Print each frame received from the CAN bus (an MS2), pings left out
   Message::setBusTrace(true);
+  // Test: the command station answers "ms2-conf" to an MS2 (Rocrail's answer
+  // is refused by the MS2); false: Rocrail answers
+  Message::setAnswerMs2Conf(true);
   // Feedback sensor, before the signal task that uses it
   Feedback::setup(FEEDBACK_PIN);
   // Serial trace of the feedback: setTrace(cv, search)
