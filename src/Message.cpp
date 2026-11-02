@@ -808,7 +808,9 @@ bool Message::busConfigRequest()
         t += line;
         for (uint8_t f = 0; f < 16; f++)
         {
-            const uint8_t type = info.valid ? info.fnType[f] : (f == 0 ? 1 : 0);
+            // Without the configuration of the decoder (serial command C):
+            // light for F0, the generic symbol "Fn" (50 + n) for the others
+            const uint8_t type = info.valid ? info.fnType[f] : (f == 0 ? 1 : 50 + f);
             snprintf(line, sizeof(line), " .fkt\n ..nr=%u\n ..typ=%u\n ..wert=%u\n", f, type, l.funct(f) ? 1 : 0);
             t += line;
         }
