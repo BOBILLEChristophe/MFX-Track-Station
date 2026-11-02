@@ -86,6 +86,13 @@ public:
     // level it gives. The 040 DE answered only the frames where our flip
     // was there, whichever window level (test bench, 2 Nov).
     static bool alwaysFlip;
+    // Test (serial command P), with alwaysFlip: the answer window at
+    // windowLevel all the same. The bits 0011 end at the level the
+    // synchronisations start at: when it is windowLevel, one transition is
+    // added before the synchronisations (a half bit), so that the transition
+    // after 0011 leads to windowLevel. Some decoders (150 X 1518, 150 Y)
+    // answered only at windowLevel, the 040 DE only with the transition.
+    static bool parityFix;
 
     // Frame inserted between the question and the request (the command
     // station frame: 9 + 6 + 32 + 16 + 8 = 71 bits), at most

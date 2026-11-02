@@ -267,6 +267,10 @@ void setup()
   // bits: its search stopped at bit 8 (test bench, 2 Nov). Serial command A
   // switches it off and on.
   MfxSignal::alwaysFlip = true;
+  // And the answer window always at the same level (a half bit before the
+  // synchronisations when needed): the 150 X 1518 and the 150 Y did not
+  // answer at the other level. Serial command P switches it off and on.
+  MfxSignal::parityFix = true;
 
   // Initialize RMTChannel
   RMTChannel::setup(IN1_pin, IN2_pin);

@@ -7,6 +7,7 @@
 bool MfxSignal::windowLevel = true;
 uint16_t MfxSignal::answerFlipUs = MfxSignal::FORCE_US;
 bool MfxSignal::alwaysFlip = false;
+bool MfxSignal::parityFix = false;
 
 void MfxSignal::push(bool level0, bool level1, uint16_t duration0, uint16_t duration1)
 {
@@ -44,6 +45,12 @@ void MfxSignal::request(const uint8_t *insert)
     {
         sync();
         frame(insert);
+    }
+    if (alwaysFlip && parityFix && mLevel == windowLevel)
+    {
+        // A half bit at the other level before the synchronisations
+        push(mLevel, !mLevel, FORCE_US, HALF_US);
+        mLevel = !mLevel;
     }
     for (uint8_t i = 0; i < FEEDBACK_SYNCS; i++)
         sync();
