@@ -7,7 +7,7 @@
 bool MfxSignal::windowLevel = true;
 uint16_t MfxSignal::answerFlipUs = MfxSignal::FORCE_US;
 bool MfxSignal::answerPulse = true;
-uint16_t MfxSignal::pulseUs = MfxSignal::FORCE_US;
+uint16_t MfxSignal::pulseUs = 10;
 volatile uint8_t MfxSignal::lastEnd = MfxSignal::END_NONE;
 
 void MfxSignal::push(bool level0, bool level1, uint16_t duration0, uint16_t duration1)

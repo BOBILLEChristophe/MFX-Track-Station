@@ -817,7 +817,7 @@ static void console()
         }
         else if (c == 'I')
         {
-            // Test: I<µs> = length of the pulse after 0011 (I2 = Gleisbox)
+            // Test: I<µs> = length of the pulse after 0011 (I10 = default, about 2 on the Gleisbox)
             vTaskDelay(pdMS_TO_TICKS(50));
             uint16_t us = 0;
             bool digits = false;
@@ -827,7 +827,7 @@ static void console()
                 digits = true;
             }
             if (!digits || us == 0 || us > 100)
-                Serial.printf("\nI: I followed by the pulse length in µs, 1 to 100 (I2 = default), now %u\n",
+                Serial.printf("\nI: I followed by the pulse length in µs, 1 to 100 (I10 = default), now %u\n",
                               MfxSignal::pulseUs);
             else
             {
@@ -863,7 +863,7 @@ static void console()
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
                           "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "
                           "T<UID>[,1] = test bench, search questions for every count (,1: other bits at 1), "
-                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I2 default), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I10 default), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }

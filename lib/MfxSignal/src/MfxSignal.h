@@ -88,8 +88,10 @@ public:
     // 040 DE (ESU) answers only with this transition, the 150 X 1518 and the
     // 150 Y only at windowLevel. Serial command A switches it off and on.
     static bool answerPulse;
-    // Test (serial command I): length of that pulse in µs (2 as measured on
-    // the Gleisbox, which an H-bridge may not reproduce as well)
+    // Length of that pulse in µs (serial command I to change it). About 2 µs
+    // on the Gleisbox, but through our H-bridge the 040 DE answered only 29
+    // verifies out of 47 with 2 µs, and every one with 5, 10 and 25 µs
+    // (test bench, 2 Nov): 10 µs, in the middle.
     static uint16_t pulseUs;
     // How the last request ended (test bench): bits 0011 followed by a
     // pulse, by one flip, or by nothing
