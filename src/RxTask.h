@@ -17,6 +17,7 @@
 extern uint8_t rxBuffer[];
 extern const uint8_t BUFFER_S;
 bool readRocrailFrame(uint8_t *buf, size_t len);
+bool sendToTcp(const uint8_t *buf, size_t len); // to Rocrail only
 
 void rxTask(void *pvParameters);
 

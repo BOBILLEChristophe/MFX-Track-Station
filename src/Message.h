@@ -52,6 +52,9 @@ private:
     static uint8_t data[8];
     static bool trace;         // Debug: internal tasks (very verbose)
     static bool traceCommands; // Commands received from Rocrail
+    static bool traceBus;      // Frames received from the CAN bus
+    static bool answerMs2Conf; // "ms2-conf" answered by the command station
+    static bool simulateGui;   // ping answer of a CS2 GUI for an MS2
     static byte buff[BUFF_MSG_SIZE];
     static Loco **loco;
     static volatile byte locoSize; // locomotives in loco[]
@@ -68,6 +71,20 @@ public:
     static bool removeLoco(uint16_t address);
     // Prints each command received from Rocrail (speed, direction, functions)
     static void setTrace(bool on) { traceCommands = on; }
+    // Origin of the frame being parsed: true for the CAN bus (an MS2...),
+    // false for Rocrail (TCP). Set by rxTask before parse().
+    static bool fromBus;
+    // Trace of the frames received from the CAN bus (pings left out)
+    static void setBusTrace(bool on) { traceBus = on; }
+    static bool busTrace() { return traceBus; }
+    // Test: the command station answers itself the request "ms2-conf" of an
+    // MS2 (format of can2udp, G. Bertelsmann), instead of Rocrail
+    static void setAnswerMs2Conf(bool on) { answerMs2Conf = on; }
+    static bool answersMs2Conf() { return answerMs2Conf; }
+    // Test: when an MS2 answers a ping, a ping answer of a CS2 GUI (type
+    // FFFF) is sent on the bus, as can2udp -g does to make it a CS2 slave
+    static void setSimulateGui(bool on) { simulateGui = on; }
+    static bool simulatesGui() { return simulateGui; }
     static void decodeMsg(byte *);
     static void parse();
     static void periodic(void *);
@@ -83,10 +100,14 @@ public:
 private:
     static void configRequest();
     static void pingAnswer();
+    // As a Gleisbox: confirms an order to a locomotive, answers a request
+    static void locoAnswer(Loco *l);
     // As a Gleisbox: answers a system command (echo, or the identifier)
     static void systemAnswer();
     // As a Gleisbox: the description of the device (command 0x1D, index 0)
     static void statusDataAnswer();
     static void sendLocoList();
+    static void sendMs2Conf();
+    static bool busConfigRequest();
     static void traceUnknown();
 };

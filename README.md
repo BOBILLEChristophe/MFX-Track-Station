@@ -17,6 +17,7 @@ Ce projet fait l'objet d'un fil sur le forum 3R : https://forum.3rails.fr/t/cont
 - **La centrale se comporte comme une Gleisbox Märklin**, et Rocrail (option **Master** du pilote MBUS) comme la MS2 : posez une locomotive mfx sur la voie, la centrale la trouve et la signale à Rocrail, qui lui donne une adresse, lit son nom et **crée la locomotive dans sa liste**. Rien à déclarer, ni dans `src/main.cpp`, ni à la main dans Rocrail (pensez seulement à enregistrer le plan). Essayé avec quatre locomotives (deux décodeurs ESU, deux Märklin).
 - **Plusieurs locomotives** (16 au plus pilotées en même temps).
 - **Présence des locomotives** : chacune est interrogée à tour de rôle, comme le fait la MS2, ce qui garde son inscription ; le moniteur série signale une locomotive qui quitte la voie ou qui y revient.
+- **Bus CAN et MS2** : une MS2 branchée sur le bus CAN de la Box pilote la centrale en esclave (liste des locomotives avec leurs noms, vitesse, sens, fonctions), Rocrail restant le maître et suivant ce qui est fait sur la MS2 (voir plus bas).
 - **Suppression d'une locomotive**, comme sur la MS2 (ordre du maître, ou commande `D` du moniteur série).
 - **Protection contre les courts-circuits** : la voie est coupée au-delà du seuil (1 A par défaut) et ne repart que sur un Go de Rocrail.
 - **FreeRTOS** : chaque fonction (signal, réception, surveillance du courant) tourne dans sa propre tâche.
@@ -27,7 +28,9 @@ Ce projet fait l'objet d'un fil sur le forum 3R : https://forum.3rails.fr/t/cont
 - Bruit des moteurs avec le comparateur à 1 MΩ : à vérifier pendant une lecture.
 - La 040 DE (décodeur ESU récent) ne répond qu'une fois sur deux environ aux questions de la centrale, alors qu'elle répond à la Gleisbox : chantier en cours, au renifleur.
 - Écriture des CV.
-- Fonctions F16 et au-delà, arrêt d'urgence, réponses à Rocrail (état, surcharge).
+- Bruit des sons (sifflets, bruits de fond) et des moteurs dans les fenêtres de réponse : ne pas compter un échec de vérification quand la fenêtre de référence est elle-même bruyante.
+- MS2 : demande « langver » (version du fichier de langue) sans réponse ; canaux de mesure (courant, tension, température) comme la Gleisbox.
+- Fonctions F16 et au-delà, réponses à Rocrail (surcharge).
 - Passage au nouveau pilote RMT d'ESP-IDF 5.
 - Circuit imprimé pour le capteur de retour.
 
@@ -133,6 +136,26 @@ L'UID se lit par exemple avec une MS2 et l'exemple `MfxObserver` de [Railuino](h
 1. Déclarez une centrale **MBUS** (Märklin CAN, sous-bibliothèque TCP), avec l'adresse IP de la centrale et le port **15731**.
 2. Dans l'onglet **Options**, cochez **Master** : Rocrail joue alors le rôle de la MS2, donne les adresses et crée les locomotives. Redémarrez Rocrail.
 3. Cliquez sur **Go** pour mettre la voie sous tension, puis posez les locomotives : chacune apparaît dans la liste de Rocrail, avec son nom lu dans le décodeur. **Enregistrez le plan** pour garder les locomotives créées.
+
+### Bus CAN et MS2
+
+La centrale a le bus CAN Märklin (250 kbit/s, identifiants de 29 bits) de la Box : RX sur GPIO 4, TX sur GPIO 5, avec un transceiver CAN 3,3 V. La bibliothèque est ACAN_ESP32 de Pierre Molinaro, version 1.1.2 (les versions 1.2 et suivantes demandent le cœur Arduino 3). Une **MS2** se branche sur ce bus comme sur une Gleisbox, et **pilote la centrale en esclave** pendant que Rocrail reste le maître.
+
+**Passerelle, comme une CS2.** Chaque trame de Rocrail est recopiée sur le bus, chaque trame du bus est transmise à Rocrail. La centrale exécute les ordres venus de l'un ou de l'autre (vitesse, sens, fonctions, arrêt d'urgence d'une locomotive, Stop et Go) et y répond comme une Gleisbox : un ordre est confirmé (mêmes octets, bit de réponse), une question reçoit l'état de la locomotive. Rocrail suit donc ce qui est fait sur la MS2 (curseur de vitesse, fonctions), et inversement.
+
+**La MS2 suit une « Central Station ».** Rocrail se présente au ping comme une MS2 d'UID 0 ; la MS2 réclame alors sans fin sa configuration (« ms2-conf ») et n'affiche aucune locomotive. La centrale fait donc ce que fait le serveur MäCAN quand il est maître :
+
+- toutes les 10 s, elle envoie un ping sur le bus et la réponse d'une interface de CS2 (type FFFF) ; la réponse de Rocrail au ping ne va plus sur le bus ;
+- elle répond elle-même aux demandes de la MS2 : « loknamen » (la liste des noms) et « lokinfo » (la fiche d'une locomotive : adresse, UID, vitesse, sens, fonctions F0 à F15 et leurs icônes) ; les réponses de Rocrail à la MS2 restent hors du bus, pour qu'il n'y en ait qu'une.
+
+Sur la MS2, on choisit une locomotive dans la liste et on la charge (la MS2 ne les charge pas d'elle-même). Les locomotives proposées sont celles que Rocrail a inscrites, avec le **nom lu dans le décodeur** (la centrale garde le nom quand Rocrail le lit). Les **icônes des fonctions** demandent la configuration du décodeur : commande `C` du moniteur série, locomotives sur la voie ; sans elle, F1 à F15 apparaissent avec le symbole générique « Fn ».
+
+**Ce qu'il faut savoir :**
+
+- Démarrez la centrale et Rocrail **avant** de brancher la MS2 : elle doit voir la Central Station dès son démarrage.
+- La MS2 s'alimente par sa Gleisbox ; une vraie Gleisbox sur le bus exécute aussi les ordres de Rocrail (inscriptions, lectures) et y répond, parfois en même temps que la centrale. Pour les inscriptions, il vaut mieux qu'elle ne soit pas sur le bus ; sa sortie voie ne doit pas être reliée aux rails de la centrale.
+- Le journal série affiche chaque trame reçue du bus (lignes `CAN:`, sans les pings) et chaque appareil qui répond au ping ; `Message::setBusTrace(false)` les supprime. `Message::setSimulateGui(false)` et `Message::setAnswerMs2Conf(false)` rendent la main à Rocrail.
+- Avec Ethernet, `Ethernet.init(5)` prend aussi la GPIO 5 : il faut déplacer l'une des deux broches.
 
 ### Contribution
 

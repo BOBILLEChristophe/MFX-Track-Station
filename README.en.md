@@ -17,6 +17,7 @@ This project has a thread on the 3R forum (in French): https://forum.3rails.fr/t
 - **The command station behaves as a Märklin Gleisbox**, and Rocrail (option **Master** of the MBUS driver) as the MS2: put an mfx locomotive on the track, the command station finds it and reports it to Rocrail, which gives it an address, reads its name and **creates the locomotive in its list**. Nothing to declare, neither in `src/main.cpp` nor by hand in Rocrail (just save the plan). Tried with four locomotives (two ESU decoders, two Märklin).
 - **Several locomotives** (up to 16 driven at the same time).
 - **Presence of the locomotives**: each one is queried in turn, as the MS2 does, which keeps its registration; the serial monitor tells when a locomotive leaves the track or comes back.
+- **CAN bus and MS2**: an MS2 connected to the CAN bus of the Box drives the command station as a slave (list of the locomotives with their names, speed, direction, functions), Rocrail staying the master and following what is done on the MS2 (see below).
 - **Deletion of a locomotive**, as on the MS2 (order of the master, or serial command `D`).
 - **Short-circuit protection**: the track is switched off above the threshold (1 A by default) and only comes back on a Go from Rocrail.
 - **FreeRTOS**: each function (signal, reception, current monitoring) runs in its own task.
@@ -27,7 +28,9 @@ This project has a thread on the 3R forum (in French): https://forum.3rails.fr/t
 - Noise of the motors with the 1 MΩ comparator: to be checked during a read.
 - The 040 DE (recent ESU decoder) answers only about one question in two from the command station, while it answers the Gleisbox: work in progress, with the sniffer.
 - Writing of CVs.
-- Functions F16 and above, emergency stop, answers to Rocrail (state, overload).
+- Noise of sounds (whistles, background sounds) and motors in the answer windows: do not count a failed check when the reference window is noisy itself.
+- MS2: request "langver" (version of the language file) not answered; measurement channels (current, voltage, temperature) as the Gleisbox.
+- Functions F16 and above, answers to Rocrail (overload).
 - Move to the new RMT driver of ESP-IDF 5.
 - Printed circuit board for the feedback sensor.
 
@@ -133,6 +136,26 @@ The UID can be read for example with an MS2 and the `MfxObserver` example of [Ra
 1. Declare an **MBUS** command station (Märklin CAN, TCP sublibrary), with the IP address of the command station and port **15731**.
 2. In the **Options** tab, tick **Master**: Rocrail then plays the part of the MS2, gives the addresses and creates the locomotives. Restart Rocrail.
 3. Click **Go** to power the track, then put the locomotives on it: each one appears in the list of Rocrail, with its name read in the decoder. **Save the plan** to keep the locomotives created.
+
+### CAN bus and MS2
+
+The command station has the Märklin CAN bus (250 kbit/s, 29-bit identifiers) of the Box: RX on GPIO 4, TX on GPIO 5, with a 3.3 V CAN transceiver. The library is ACAN_ESP32 by Pierre Molinaro, version 1.1.2 (versions 1.2 and later need the Arduino core 3). An **MS2** connects to this bus as to a Gleisbox, and **drives the command station as a slave** while Rocrail stays the master.
+
+**Gateway, as a CS2.** Each frame of Rocrail is copied to the bus, each frame of the bus is passed to Rocrail. The command station executes the orders of either side (speed, direction, functions, emergency stop of a locomotive, Stop and Go) and answers as a Gleisbox: an order is confirmed (same bytes, response bit), a request gets the state of the locomotive. Rocrail therefore follows what is done on the MS2 (speed slider, functions), and the other way round.
+
+**The MS2 follows a "Central Station".** Rocrail presents itself to the ping as an MS2 of UID 0; the MS2 then asks for its configuration ("ms2-conf") again and again and shows no locomotive. So the command station does what the MaeCAN server does when it is master:
+
+- every 10 s, it sends a ping on the bus and the answer of a CS2 GUI (type FFFF); the ping answer of Rocrail no longer goes to the bus;
+- it answers the requests of the MS2 itself: "loknamen" (the list of names) and "lokinfo" (the card of a locomotive: address, UID, speed, direction, functions F0 to F15 and their icons); the answers of Rocrail to the MS2 stay off the bus, so that there is only one.
+
+On the MS2, choose a locomotive in the list and load it (the MS2 does not load them by itself). The locomotives offered are those registered by Rocrail, with the **name read in the decoder** (the command station keeps the name when Rocrail reads it). The **function icons** need the configuration of the decoder: serial command `C`, locomotives on the track; without it, F1 to F15 appear with the generic symbol "Fn".
+
+**Good to know:**
+
+- Start the command station and Rocrail **before** connecting the MS2: it must see the Central Station when it starts.
+- The MS2 is powered by its Gleisbox; a real Gleisbox on the bus also executes the orders of Rocrail (registrations, reads) and answers them, sometimes together with the command station. For registrations, it is better off the bus; its track output must not be connected to the rails of the command station.
+- The serial log prints each frame received from the bus (lines `CAN:`, pings left out) and each device that answers the ping; `Message::setBusTrace(false)` turns them off. `Message::setSimulateGui(false)` and `Message::setAnswerMs2Conf(false)` give the hand back to Rocrail.
+- With Ethernet, `Ethernet.init(5)` also takes GPIO 5: one of the two pins must move.
 
 ### Contributing
 

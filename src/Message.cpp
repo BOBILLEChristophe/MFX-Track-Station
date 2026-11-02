@@ -6,6 +6,7 @@
 */
 
 #include "Message.h"
+#include "CanBus.h"
 #include "Centrale.h"
 #include "MfxFrame.h"
 #include "Cs2Config.h"
@@ -24,6 +25,10 @@ uint8_t Message::prio = 0;
 uint8_t Message::cmd = 0;
 uint8_t Message::response = 0;
 uint16_t Message::hash = 0;
+bool Message::fromBus = false;
+bool Message::traceBus = true;
+bool Message::answerMs2Conf = true;
+bool Message::simulateGui = false;
 uint8_t Message::data[8] = {0};
 byte Message::buff[BUFF_MSG_SIZE] = {0};
 
@@ -214,6 +219,23 @@ void Message::parse()
 
     if (cmd == CAN_CONFIG_DATA)
     {
+        // A Gleisbox does not answer: a device of the bus (an MS2) asks
+        // Rocrail, which gets the request through the command station
+        if (fromBus)
+        {
+            char name[9];
+            memcpy(name, data, 8);
+            name[8] = 0;
+            if (answerMs2Conf && strcmp(name, "ms2-conf") == 0)
+            {
+                sendMs2Conf();
+                return;
+            }
+            if (simulateGui && busConfigRequest())
+                return;
+            Serial.printf("CAN: a device asks Rocrail for the configuration \"%s\"\n", name);
+            return;
+        }
         configRequest();
         return;
     }
@@ -250,8 +272,17 @@ void Message::parse()
             break;
         case 0x02: // System Halt : à implémenter (étape 3)
             break;
-        case 0x03: // Arrêt d'urgence de la locomotive : à implémenter (étape 3)
+        case 0x03: // emergency stop of one locomotive (MS2: stop key)
+        {
+            const uint16_t locId = (uint16_t)data[2] << 8 | data[3];
+            if (locId >= 0x4000 && locId < 0x8000)
+                if (Loco *l = Loco::findLoco(locId - 0x4000))
+                {
+                    l->speed(0);
+                    sendNow(l);
+                }
             break;
+        }
         case 0x09: // re-registration counter, set by the master (MS2: at power on)
             if (length >= 7)
             {
@@ -303,7 +334,8 @@ void Message::parse()
 
     if (cmd < CAN_LOCO_SPEED || cmd > CAN_LOCO_FUNCT || length < 4)
     {
-        traceUnknown();
+        if (!(cmd == 0x21 && traceBus)) // config streams: printed by rxTask
+            traceUnknown();
         return;
     }
 
@@ -384,6 +416,7 @@ void Message::parse()
                        (cmd == CAN_LOCO_FUNCT && length >= 6);
     if (order)
         sendNow(currentLoco);
+    locoAnswer(currentLoco);
 
     if (traceCommands)
     {
@@ -449,13 +482,58 @@ bool Message::answer(uint8_t cmd, uint8_t len, const uint8_t *d)
     return sendToRocrail(frame, sizeof(frame));
 }
 
+/*
+ As a Gleisbox: an order to a locomotive (speed, direction, function) is
+ confirmed with the same bytes and the response bit; a request (shorter) is
+ answered with the state of the locomotive. An MS2 on the bus and Rocrail
+ both see the result.
+*/
+void Message::locoAnswer(Loco *l)
+{
+    uint8_t d[8];
+    memcpy(d, data, 8);
+    uint8_t len = length;
+    switch (cmd)
+    {
+    case CAN_LOCO_SPEED:
+        if (length < 6)
+        {
+            const uint16_t v = l->speed() == 0 ? 0 : (uint16_t)(((uint32_t)l->speed() * 1000 + 63) / 127);
+            d[4] = (uint8_t)(v >> 8);
+            d[5] = (uint8_t)v;
+            len = 6;
+        }
+        break;
+    case CAN_LOCO_DIREC:
+        if (length < 5)
+        {
+            d[4] = l->dir() == 0 ? 1 : 2;
+            len = 5;
+        }
+        break;
+    case CAN_LOCO_FUNCT:
+        if (length == 5)
+        {
+            d[5] = l->funct(data[4]) ? 1 : 0;
+            len = 6;
+        }
+        else if (length < 5)
+            return;
+        break;
+    default:
+        return;
+    }
+    answer(cmd, len, d);
+}
+
 static const uint16_t KENNUNG = 0x0001; // 0 and FFFF are not valid
 
 void Message::systemAnswer()
 {
     const uint32_t own = Centrale::gUid();
     const uint32_t to = (uint32_t)data[0] << 24 | (uint32_t)data[1] << 16 | (uint32_t)data[2] << 8 | data[3];
-    if (to != 0 && to != own)
+    // Emergency stop of a locomotive (0x03): the UID field is the loco id
+    if (to != 0 && to != own && !(length >= 5 && data[4] == 0x03))
         return;
     uint8_t d[8];
     memcpy(d, data, 8);
@@ -465,6 +543,7 @@ void Message::systemAnswer()
     case 0x00: // STOP
     case 0x01: // GO
     case 0x02: // halt
+    case 0x03: // emergency stop of a locomotive (recorded: echoed by the Gleisbox)
     case 0x08: // track protocols
     case 0x09: // re-registration counter
         break;
@@ -563,6 +642,184 @@ void Message::configRequest()
 
     if (strcmp(name, "loks") == 0)
         sendLocoList();
+}
+
+/*
+ Answer to "ms2-conf" (an MS2 in slave mode asks it to its master), as
+ can2udp (ms2-loco-list.c, G. Bertelsmann) does: the request with the
+ response bit, then the plain text in a config data stream with the hash of
+ the MS2. Length without the padding, CRC with it. Sent on the bus only.
+ Rocrail answers ".magpro=0 .lokpro=7", length with the padding: the MS2
+ asks again and again.
+*/
+void Message::sendMs2Conf()
+{
+    static const char text[] = "[config]\n .magprot=0\n .lokprot=7\n";
+    const size_t len = sizeof(text) - 1;
+    const size_t padded = (len + 7) / 8 * 8;
+    uint8_t data[48];
+    memset(data, 0, sizeof(data));
+    memcpy(data, text, len);
+    const uint16_t crc = Cs2Config::crcCcitt(data, padded, 0xFFFF);
+
+    uint8_t frame[13];
+    putFrame(frame, ((uint32_t)CAN_CONFIG_DATA << 17) | 0x00010000UL | cs2Hash(Centrale::gUid()), 8, Message::data);
+    CanBus::send(frame, 13);
+    const uint32_t streamId = ((uint32_t)CAN_CONFIG_DATA_STREAM << 17) | hash;
+    const uint8_t head[6] = {0, 0, 0, (uint8_t)len, (uint8_t)(crc >> 8), (uint8_t)crc};
+    putFrame(frame, streamId, 6, head);
+    CanBus::send(frame, 13);
+    for (size_t i = 0; i < padded; i += 8)
+    {
+        vTaskDelay(pdMS_TO_TICKS(2));
+        putFrame(frame, streamId, 8, data + i);
+        CanBus::send(frame, 13);
+    }
+    Serial.printf("CAN: \"ms2-conf\" answered by the command station (%u bytes, CRC %04X)\n", (unsigned)len, crc);
+}
+
+/*
+ A text in a config data stream on the bus, to the device of hash toHash:
+ a frame of 6 bytes (length without the padding, CRC of the padded data),
+ then the data in frames of 8 bytes (MaeCAN server, can2udp).
+*/
+static void streamToBus(const char *text, size_t len, uint16_t toHash)
+{
+    const size_t padded = (len + 7) / 8 * 8;
+    uint8_t *data = (uint8_t *)calloc(padded ? padded : 8, 1);
+    if (data == nullptr)
+        return;
+    memcpy(data, text, len);
+    const uint16_t crc = Cs2Config::crcCcitt(data, padded, 0xFFFF);
+    const uint32_t streamId = ((uint32_t)CAN_CONFIG_DATA_STREAM << 17) | toHash;
+    uint8_t frame[13];
+    const uint8_t head[6] = {(uint8_t)(len >> 24), (uint8_t)(len >> 16), (uint8_t)(len >> 8), (uint8_t)len,
+                             (uint8_t)(crc >> 8), (uint8_t)crc};
+    putFrame(frame, streamId, 6, head);
+    CanBus::send(frame, 13);
+    for (size_t i = 0; i < padded; i += 8)
+    {
+        vTaskDelay(pdMS_TO_TICKS(2));
+        putFrame(frame, streamId, 8, data + i);
+        CanBus::send(frame, 13);
+    }
+    free(data);
+}
+
+// The request frame sent back with the response bit (bus only)
+static void echoRequest(const uint8_t *d)
+{
+    uint8_t frame[13];
+    putFrame(frame, ((uint32_t)CAN_CONFIG_DATA << 17) | 0x00010300UL, 8, d);
+    CanBus::send(frame, 13);
+}
+
+/*
+ An MS2 that follows a Central Station asks it its locomotives (MaeCAN
+ server, can2udp ms2-loco-list, mrsystem):
+ - "loknamen", then a frame "first count" (text): the names, as
+   [lokomotive] lok .nr .name ... numloks .wert;
+ - "lokinfo", then 2 frames with the name (16 characters at most): the
+   locomotive, in the format of lokomotive.cs2 with its state.
+ The locomotives are those of the command station (registered by Rocrail).
+ Returns true if the frame belongs to one of these requests.
+*/
+bool Message::busConfigRequest()
+{
+    static uint8_t waiting = 0; // 1: names range, 2 and 3: name of lokinfo
+    static char infoName[17];
+    char text8[9];
+    memcpy(text8, data, 8);
+    text8[8] = 0;
+
+    if (strcmp(text8, "loknamen") == 0)
+    {
+        waiting = 1;
+        return true;
+    }
+    if (strcmp(text8, "lokinfo") == 0)
+    {
+        waiting = 2;
+        memset(infoName, 0, sizeof(infoName));
+        echoRequest(data);
+        return true;
+    }
+    if (waiting == 1)
+    {
+        waiting = 0;
+        int first = 0, count = 0;
+        sscanf(text8, "%d %d", &first, &count);
+        echoRequest(data);
+        static const uint8_t MAX = 32;
+        Loco *copies = new Loco[MAX];
+        const uint8_t n = Loco::list(copies, MAX);
+        String t = "[lokomotive]\n";
+        for (int i = first; i < first + count && i < n; i++)
+        {
+            t += "lok\n";
+            if (i)
+                t += " .nr=" + String(i) + "\n";
+            t += " .name=" + copies[i].name().substring(0, 16) + "\n";
+        }
+        t += "numloks\n .wert=" + String(n) + "\n";
+        delete[] copies;
+        streamToBus(t.c_str(), t.length(), hash);
+        Serial.printf("CAN: loco names %d..%d sent to the MS2 (%u locomotives)\n", first, first + count - 1, n);
+        return true;
+    }
+    if (waiting == 2 || waiting == 3)
+    {
+        memcpy(infoName + (waiting - 2) * 8, data, 8);
+        echoRequest(data);
+        if (waiting == 2)
+        {
+            waiting = 3;
+            return true;
+        }
+        waiting = 0;
+        static const uint8_t MAX = 32;
+        Loco *copies = new Loco[MAX];
+        const uint8_t n = Loco::list(copies, MAX);
+        int found = -1;
+        for (uint8_t i = 0; i < n && found < 0; i++)
+            if (copies[i].name().substring(0, 16) == String(infoName))
+                found = i;
+        if (found < 0)
+        {
+            Serial.printf("CAN: lokinfo \"%s\": unknown locomotive\n", infoName);
+            delete[] copies;
+            return true;
+        }
+        const Loco &l = copies[found];
+        const MfxInfo info = l.mfxInfo();
+        char line[96];
+        String t = "[lokomotive]\nlokomotive\n .name=" + l.name().substring(0, 16) + "\n";
+        snprintf(line, sizeof(line), " .uid=0x%x\n .adresse=0x%x\n .typ=mfx\n .mfxuid=0x%lx\n", 0x4000 + l.addr(),
+                 l.addr(), (unsigned long)l.uid32());
+        t += line;
+        if (info.valid)
+        {
+            snprintf(line, sizeof(line), " .av=%u\n .bv=%u\n .volume=25\n .tachomax=%u\n .vmax=%u\n .vmin=%u\n",
+                     info.av, info.bv, info.tachoMax, info.vmax, info.vmin);
+            t += line;
+        }
+        const uint16_t v = l.speed() == 0 ? 0 : (uint16_t)(((uint32_t)l.speed() * 1000 + 63) / 127);
+        snprintf(line, sizeof(line), " .velocity=%u\n .richtung=%u\n", v, l.dir());
+        t += line;
+        for (uint8_t f = 0; f < 16; f++)
+        {
+            const uint8_t type = info.valid ? info.fnType[f] : (f == 0 ? 1 : 0);
+            snprintf(line, sizeof(line), " .fkt\n ..nr=%u\n ..typ=%u\n ..wert=%u\n", f, type, l.funct(f) ? 1 : 0);
+            t += line;
+        }
+        const uint16_t addr = l.addr();
+        delete[] copies;
+        streamToBus(t.c_str(), t.length(), hash);
+        Serial.printf("CAN: lokinfo \"%s\" sent to the MS2 (address %u, %u bytes)\n", infoName, addr,
+                      (unsigned)t.length());
+        return true;
+    }
+    return false;
 }
 
 /*

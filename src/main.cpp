@@ -30,6 +30,7 @@
 #include "LocoStore.h"
 #include "Message.h"
 #include "RxTask.h"
+#include "CanBus.h"
 #include "MfxRMT.h"
 
 // Central system ID used for identification
@@ -48,6 +49,10 @@ gpio_num_t IN2_pin = GPIO_NUM_33;                  // Pin for IN2 of H-Bridge
 gpio_num_t EN_pin = GPIO_NUM_32;                   // Pin for Enable signal of H-Bridge
 gpio_num_t CURRENT_MONITOR_PIN_MAIN = GPIO_NUM_36; // Pin for current mesure
 gpio_num_t FEEDBACK_PIN = GPIO_NUM_26;             // Output of the feedback comparator (MCP6541)
+gpio_num_t CAN_RX_pin = GPIO_NUM_4;                // CAN bus of the Box (transceiver RX)
+gpio_num_t CAN_TX_pin = GPIO_NUM_5;                // CAN bus of the Box (transceiver TX)
+// Note: with ETHERNET, Ethernet.init(5) below takes GPIO 5 too (chip select):
+// move one of them before using both.
 
 // Pointer to the MFX message queue
 QueueHandle_t mfxQueue = NULL;
@@ -129,16 +134,27 @@ WiFiClient client;
  Returns true when a complete frame was read.
 */
 /*
- Sends whole frames to Rocrail (answers of the command station). The client
- is shared with readRocrailFrame(): a mutex keeps the writes in one piece.
+ Sends whole frames to Rocrail only. The client is shared with
+ readRocrailFrame(): a mutex keeps the writes in one piece. Used for the
+ frames received from the CAN bus (gateway, as a CS2).
 */
-bool sendToRocrail(const uint8_t *buf, size_t len)
+bool sendToTcp(const uint8_t *buf, size_t len)
 {
   static SemaphoreHandle_t m = xSemaphoreCreateMutex();
   xSemaphoreTake(m, portMAX_DELAY);
   const bool ok = client && client.connected() && client.write(buf, len) == len;
   xSemaphoreGive(m);
   return ok;
+}
+
+/*
+ Answers of the command station: to Rocrail and to the devices of the CAN
+ bus (an MS2), as a Gleisbox on the bus of a CS2.
+*/
+bool sendToRocrail(const uint8_t *buf, size_t len)
+{
+  CanBus::send(buf, len);
+  return sendToTcp(buf, len);
 }
 
 bool readRocrailFrame(uint8_t *buf, size_t len)
@@ -222,6 +238,14 @@ void setup()
   // Print each command received from Rocrail (speed, direction, functions).
   // Set to false once everything works: printing slows down the reception.
   Message::setTrace(true);
+  // Print each frame received from the CAN bus (an MS2), pings left out
+  Message::setBusTrace(true);
+  // Test: the command station answers "ms2-conf" to an MS2 (Rocrail's answer
+  // is refused by the MS2); false: Rocrail answers
+  Message::setAnswerMs2Conf(true);
+  // Test: answer the pings of an MS2 as a CS2 GUI too (can2udp -g), so that
+  // it follows a Central Station; false: only the answers of the devices
+  Message::setSimulateGui(true);
   // Feedback sensor, before the signal task that uses it
   Feedback::setup(FEEDBACK_PIN);
   // Serial trace of the feedback: setTrace(cv, search)
@@ -240,6 +264,9 @@ void setup()
 
   // Automatic discovery of the decoders not yet registered
   Discovery::setup();
+
+  // CAN bus of the Box (an MS2 can be connected): RX GPIO 4, TX GPIO 5
+  CanBus::setup(CAN_RX_pin, CAN_TX_pin);
 
   xTaskCreatePinnedToCore(currentMonitorTask, "CurrentMonitorTask", 4 * 1024, &mainMonitor, 9, NULL, 0);
   xTaskCreatePinnedToCore(currentDisplayTask, "CurrentDisplayTask", 4 * 1024, &mainMonitor, 1, NULL, 0);
