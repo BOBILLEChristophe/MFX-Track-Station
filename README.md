@@ -50,7 +50,8 @@ Un capteur sur un fil de voie permet aux décodeurs de répondre à la centrale.
 
 - **Recherche**, par la centrale : toutes les 2 s, elle cherche les décodeurs mfx qui ne sont pas encore inscrits et lit leur UID bit par bit, comme la Gleisbox (chaque bit est d'abord demandé à 1, puis à 0 sans réponse ; 150 ms de pause après une réponse). L'UID trouvé est **signalé au maître** (commande CAN 0x01, réponse).
 - **Attribution de l'adresse** (« bind »), sur ordre du maître (0x02) : envoyée 4 fois à 43 ms d'intervalle, chacune suivie de deux synchronisations et d'un maintien de la voie de 1,6 ms, comme la Gleisbox. Rocrail choisit l'adresse (les 12 bits de poids faible de l'UID : 404 pour l'UID FFE9B194) ; les adresses vont de 1 à 16383.
-- **Interrogation** (0x03) et **lecture de CV** (0x07) sur ordre du maître : Rocrail lit ainsi le nom du décodeur, puis crée la locomotive. Une interrogation avec l'UID 0 fait oublier son adresse au décodeur (suppression, comme la MS2).
+- **Interrogation** (0x03) et **lecture de CV** (0x07) sur ordre du maître : Rocrail lit ainsi le nom du décodeur et les CV 2 à 70, puis demande une interrogation, dont la réponse lui fait créer la locomotive. Une interrogation avec l'UID 0 fait oublier son adresse au décodeur (suppression, comme la MS2).
+- **Fin de l'inscription** : avec les décodeurs ESU (040 DE, Serie 150X), Rocrail ne demande jamais cette dernière interrogation (Rocrail 26.10.25, novembre 2026) et la locomotive n'apparaît pas dans sa liste ; avec un décodeur Märklin (241 A), il la demande toujours. Quand le maître a inscrit et lu un décodeur puis ne demande plus rien pendant 8 s, la centrale l'interroge elle-même et envoie la réponse au maître, comme s'il l'avait demandée : Rocrail crée alors la locomotive (ou retrouve celle de même adresse).
 - **Présence** : la centrale interroge aussi chaque locomotive connue à tour de rôle, entre deux recherches : un décodeur qui n'est plus interrogé pendant 5 à 10 minutes se réinscrit (Krauss, § 4.3). Une locomotive qui ne répond pas 3 fois de suite est considérée hors de la voie et n'est plus interrogée qu'une fois par minute.
 - **Ordres de conduite** : comme une Gleisbox, la centrale transmet sur la voie les ordres du maître pour toute adresse mfx, même celle d'une locomotive inscrite lors d'une autre séance.
 
@@ -137,7 +138,7 @@ L'UID se lit par exemple avec une MS2 et l'exemple `MfxObserver` de [Railuino](h
 
 1. Déclarez une centrale **MBUS** (Märklin CAN, sous-bibliothèque TCP), avec l'adresse IP de la centrale et le port **15731**.
 2. Dans l'onglet **Options**, cochez **Master** : Rocrail joue alors le rôle de la MS2, donne les adresses et crée les locomotives. Redémarrez Rocrail.
-3. Cliquez sur **Go** pour mettre la voie sous tension, puis posez les locomotives : chacune apparaît dans la liste de Rocrail, avec son nom lu dans le décodeur. **Enregistrez le plan** pour garder les locomotives créées.
+3. Cliquez sur **Go** pour mettre la voie sous tension, puis posez les locomotives : chacune apparaît dans la liste de Rocrail, avec son nom lu dans le décodeur. **Attention** : une locomotive créée ainsi n'est que provisoire pour Rocrail (26.10.25) ; enregistrer le plan ne suffit pas, elle disparaît à la fermeture de Rocrail. Ouvrez ses propriétés, complétez-les si besoin, puis validez (**OK**) : elle est alors gardée dans le plan. Rocrail laisse son champ UID à 0 ; l'UID mfx peut y être reporté, **en décimal** (Rocrail ne garde pas une valeur hexadécimale) : F9E610E0 s'écrit 4192604384. Le moniteur série affiche les UID en hexadécimal (commande `L`). Le bouton **Bind** de cette fenêtre n'est pas nécessaire : la centrale et le décodeur gardent l'adresse.
 
 ### Bus CAN et MS2
 

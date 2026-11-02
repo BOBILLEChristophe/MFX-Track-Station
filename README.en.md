@@ -50,7 +50,8 @@ A sensor on one track wire lets the decoders answer the command station. It is u
 
 - **Search**, by the command station: every 2 s, it searches for the mfx decoders that are not registered yet and reads their UID bit by bit, as the Gleisbox does (each bit is first asked at 1, then at 0 without an answer; a pause of 150 ms after an answer). The UID found is **reported to the master** (CAN command 0x01, response).
 - **Address assignment** ("bind"), ordered by the master (0x02): sent 4 times, 43 ms apart, each one followed by two synchronisations and a hold of the track of 1.6 ms, as the Gleisbox does. Rocrail chooses the address (the low 12 bits of the UID: 404 for the UID FFE9B194); addresses go from 1 to 16383.
-- **Existence query** (0x03) and **read of CVs** (0x07) ordered by the master: Rocrail reads the name of the decoder this way, then creates the locomotive. A query with the UID 0 makes the decoder forget its address (deletion, as the MS2 does).
+- **Existence query** (0x03) and **read of CVs** (0x07) ordered by the master: Rocrail reads the name of the decoder and CVs 2 to 70 this way, then asks a query, whose answer makes it create the locomotive. A query with the UID 0 makes the decoder forget its address (deletion, as the MS2 does).
+- **End of the registration**: with the ESU decoders (040 DE, Serie 150X), Rocrail never asks this last query (Rocrail 26.10.25, November 2026) and the locomotive does not appear in its list; with a Märklin decoder (241 A), it always asks it. When the master has bound and read a decoder and then asks nothing more for 8 s, the command station queries it itself and sends the answer to the master, as if it had asked: Rocrail then creates the locomotive (or finds the one with the same address).
 - **Presence**: the command station also queries each known locomotive in turn, between two searches: a decoder that is not queried for 5 to 10 minutes registers again (Krauss, § 4.3). A locomotive that does not answer 3 times in a row is taken as off the track and is queried only once a minute.
 - **Driving orders**: as a Gleisbox, the command station sends to the track the orders of the master for any mfx address, even the one of a locomotive registered in another session.
 
@@ -137,7 +138,7 @@ The UID can be read for example with an MS2 and the `MfxObserver` example of [Ra
 
 1. Declare an **MBUS** command station (Märklin CAN, TCP sublibrary), with the IP address of the command station and port **15731**.
 2. In the **Options** tab, tick **Master**: Rocrail then plays the part of the MS2, gives the addresses and creates the locomotives. Restart Rocrail.
-3. Click **Go** to power the track, then put the locomotives on it: each one appears in the list of Rocrail, with its name read in the decoder. **Save the plan** to keep the locomotives created.
+3. Click **Go** to power the track, then put the locomotives on it: each one appears in the list of Rocrail, with its name read in the decoder. **Note**: a locomotive created this way is only temporary for Rocrail (26.10.25); saving the plan is not enough, it disappears when Rocrail is closed. Open its properties, complete them if needed, then confirm (**OK**): it is then kept in the plan. Rocrail leaves its UID field at 0; the mfx UID can be entered there, **in decimal** (Rocrail does not keep a hexadecimal value): F9E610E0 is written 4192604384. The serial monitor prints the UIDs in hexadecimal (command `L`). The **Bind** button of this window is not needed: the command station and the decoder keep the address.
 
 ### CAN bus and MS2
 
