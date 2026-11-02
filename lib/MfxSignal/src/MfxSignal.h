@@ -75,6 +75,28 @@ public:
     // its R and D lines show the windows at the level the Gleisbox uses.
     static bool windowLevel;
     static const uint16_t FORCE_US = 2; // the two halves of the flip item
+    // Test (serial command F): the flip before the answer window. 0: no
+    // flip (the window stays at the level the bits 0011 end at); else the
+    // time in µs from the end of the last bit to the flip. The 040 DE
+    // (ESU) does not answer when this flip is there (an odd number of
+    // stuffed bits in the frame), test bench 2 Nov.
+    static uint16_t answerFlipUs;
+    // The bits 0011 always followed by a transition, as on the Gleisbox
+    // (recorded with the MS2, 2 Nov 2026: every request, both cases): when
+    // the bits end at windowLevel already, it adds a pulse of about 2 µs at
+    // the other level, the answer window still being at windowLevel. The
+    // 040 DE (ESU) answers only with this transition, the 150 X 1518 and the
+    // 150 Y only at windowLevel. Serial command A switches it off and on.
+    static bool answerPulse;
+    // Length of that pulse in µs (serial command I to change it). About 2 µs
+    // on the Gleisbox, but through our H-bridge the 040 DE answered only 29
+    // verifies out of 47 with 2 µs, and every one with 5, 10 and 25 µs
+    // (test bench, 2 Nov): 10 µs, in the middle.
+    static uint16_t pulseUs;
+    // How the last request ended (test bench): bits 0011 followed by a
+    // pulse, by one flip, or by nothing
+    enum : uint8_t { END_NONE, END_FLIP, END_PULSE };
+    static volatile uint8_t lastEnd;
 
     // Frame inserted between the question and the request (the command
     // station frame: 9 + 6 + 32 + 16 + 8 = 71 bits), at most
@@ -166,7 +188,7 @@ private:
     void request(const uint8_t *insert);
     // Brings the track to `level`: nothing if it is already there, else one
     // item of 2 x FORCE_US with the transition in the middle
-    void forceLevel(bool level);
+    void forceLevel(bool level, uint16_t delayUs = FORCE_US);
     void push(bool level0, bool level1, uint16_t duration0 = HALF_US, uint16_t duration1 = HALF_US);
 
     MfxItem mItems[MAX_ITEMS];

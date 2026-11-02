@@ -3,6 +3,11 @@
 ## Unreleased
 
 ### Changed
+- **End of the feedback request as the Gleisbox** (recorded with an MS2, Nov 2026): the answer window always at the same level, and the bits 0011 always followed by a transition. When they already end at the window level, a pulse at the other level is added (`MfxSignal::answerPulse`, `MfxSignal::pulseUs`). The 040 DE (recent ESU decoder) answered only with a transition after 0011: it now registers by itself, and its configuration is read without a failure. The pulse lasts 10 µs: with 2 µs, as on the Gleisbox, the 040 answered 29 verifies out of 47 through our H-bridge; with 5, 10 and 25 µs, 50 out of 50. Verified with the 150 X 1518 and the ESU 150X (50/50).
+- 1-bit feedback: an answer is also recognised by a long run of regular intervals (at least 15, `ANSWER_RUN_MIN`); a weak answer above the reference counts as present; a verify is not counted as a failure when the reference window is noisy; a search question is asked up to 4 times, 70 ms apart; a locomotive that runs is not read for the master (failure answered); the search prints the bit where it stops.
+
+### Added
+- Test bench of the feedback (serial commands `M`, `N`, `S`, `T`, `A`, `I`, `F`): verify questions, name reads and search questions repeated, with the counts of both windows, the end of each request and statistics. `C<address>`: reads the configuration of one locomotive again. A line is printed when the reading of a configuration starts.
 - The command station frame (UID and counter) is sent every 50 ms (`STATION_PERIOD_MS`, 500 ms before), as the MS2 does (46 ms); the decoder search starts with the UID FFFFFFFF, as the MS2 sends it (the UID is not compared with a count of 0).
 - **Feedback request as a Marklin MS2 sends it** (recorded on the track of a Gleisbox with an MS2, with the new track sniffer): the question (search, verify, read CV), a synchronisation, the command station frame (111 101, UID and counter), then 2 synchronisations (11 before), the bits 0011 and windows of 6.0 ms (6.4 ms before). The recent ESU decoder of the 040 DE 9 answers the MS2 (search, verify, 80 reads of CVs) but never answered the former request. `MfxSignal::feedbackWindows()` and `dataWindow()` take the inserted frame; `MfxSignal::MAX_ITEMS` 434 (512 in the RMT memory). New unit test.
 

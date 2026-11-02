@@ -5,6 +5,10 @@
 #include "MfxSignal.h"
 
 bool MfxSignal::windowLevel = true;
+uint16_t MfxSignal::answerFlipUs = MfxSignal::FORCE_US;
+bool MfxSignal::answerPulse = true;
+uint16_t MfxSignal::pulseUs = 10;
+volatile uint8_t MfxSignal::lastEnd = MfxSignal::END_NONE;
 
 void MfxSignal::push(bool level0, bool level1, uint16_t duration0, uint16_t duration1)
 {
@@ -49,14 +53,27 @@ void MfxSignal::request(const uint8_t *insert)
     bit0();
     bit1();
     bit1();
-    forceLevel(windowLevel);
+    if (answerPulse && mLevel == windowLevel)
+    {
+        // Already at the window level: a short pulse at the other level all
+        // the same, so that a transition follows the bits 0011 (Gleisbox)
+        push(mLevel, !mLevel, FORCE_US, pulseUs);
+        lastEnd = END_PULSE;
+    }
+    else if (answerFlipUs != 0 && mLevel != windowLevel)
+    {
+        forceLevel(windowLevel, answerFlipUs);
+        lastEnd = END_FLIP;
+    }
+    else
+        lastEnd = END_NONE;
 }
 
-void MfxSignal::forceLevel(bool level)
+void MfxSignal::forceLevel(bool level, uint16_t delayUs)
 {
     if (mLevel == level)
         return;
-    push(mLevel, level, FORCE_US, FORCE_US);
+    push(mLevel, level, delayUs, FORCE_US);
     mLevel = level;
 }
 
@@ -66,10 +83,11 @@ void MfxSignal::feedbackWindows(uint32_t *windowUs, uint32_t *referenceUs, const
 
     if (windowUs)
         *windowUs = durationUs();
+    const bool answerLevel = mLevel; // windowLevel, unless F0
     hold(FEEDBACK_WINDOW_US);
 
     sync();
-    forceLevel(!windowLevel);
+    forceLevel(!answerLevel);
 
     if (referenceUs)
         *referenceUs = durationUs();

@@ -77,6 +77,10 @@ static volatile uint32_t sLastEdge = 0;   // cycles
 static volatile uint16_t sRegular = 0;
 static uint32_t sRegularMin = 17 * 240, sRegularMax = 21 * 240; // cycles, set in setup()
 static volatile uint16_t sWindowRegular = 0;
+// Longest run of consecutive regular intervals: an answer is one long
+// carrier (about 300 periods in a row); noise gives scattered intervals
+static volatile uint16_t sRun = 0, sRunMax = 0;
+static volatile uint16_t sWindowRun = 0;
 
 // Trigger for an oscilloscope (setScope())
 static gpio_num_t sScopePin = GPIO_NUM_NC;
@@ -100,7 +104,15 @@ static void IRAM_ATTR onEdge()
     {
         const uint32_t dt = c - sLastEdge;
         if (dt >= sRegularMin && dt <= sRegularMax)
+        {
             sRegular = sRegular + 1;
+            const uint16_t run = sRun + 1;
+            sRun = run;
+            if (run > sRunMax)
+                sRunMax = run;
+        }
+        else
+            sRun = 0;
     }
     sLastEdge = c;
     if (sCapture)
@@ -191,6 +203,8 @@ void Feedback::onTimer(void *arg)
             scope(false, true);
         pcnt_counter_clear(UNIT);
         sRegular = 0;
+        sRun = 0;
+        sRunMax = 0;
         sCountRegular = true;
         break;
     case READ_WINDOW:
@@ -198,6 +212,7 @@ void Feedback::onTimer(void *arg)
         sCountRegular = false;
         sWindowEdges = edges;
         sWindowRegular = sRegular;
+        sWindowRun = sRunMax;
         break;
     case DATA_START:
         sEdgeCount = 0;
@@ -219,6 +234,8 @@ void Feedback::onTimer(void *arg)
         r.reference = edges;
         r.windowRegular = sWindowRegular;
         r.referenceRegular = sRegular;
+        r.windowRun = sWindowRun;
+        r.referenceRun = sRunMax;
         r.answered = false; // decided in ask()
         xQueueOverwrite(sResult, &r);
         break;
@@ -350,12 +367,14 @@ bool Feedback::ask(const MfxFrame &frame, Result *result)
 
     // An answer: many intervals of one carrier period in the answer window,
     // clearly more than in the reference window (no answer expected there)
-    r.answered = done && r.windowRegular >= ANSWER_MIN_REGULAR &&
-                 r.windowRegular >= r.referenceRegular + ANSWER_MARGIN;
+    r.answered = done && ((r.windowRegular >= ANSWER_MIN_REGULAR &&
+                           r.windowRegular >= r.referenceRegular + ANSWER_MARGIN) ||
+                          (r.windowRun >= ANSWER_RUN_MIN && r.windowRegular >= ANSWER_RUN_MIN_REGULAR &&
+                           r.windowRegular >= r.referenceRegular + ANSWER_RUN_MARGIN));
     if (sTraceSearch)
     {
-        Serial.printf("Feedback: window %d edges (%u regular), reference %d edges (%u regular) -> %s\n",
-                      r.window, r.windowRegular, r.reference, r.referenceRegular,
+        Serial.printf("Feedback: window %d edges (%u regular, run %u), reference %d edges (%u regular, run %u) -> %s\n",
+                      r.window, r.windowRegular, r.windowRun, r.reference, r.referenceRegular, r.referenceRun,
                       !done ? "no result (timeout)" : r.answered ? "answer" : "no answer");
     }
     if (result)

@@ -13,6 +13,7 @@
 #include "MfxConfig.h"
 #include "Cs2Config.h"
 #include "LocoStore.h"
+#include "MfxSignal.h"
 #include <unordered_map>
 
 // Addresses of the known locomotives, sorted (at most max)
@@ -27,7 +28,12 @@ static uint8_t knownAddresses(uint16_t *out, uint8_t max)
 
 static const uint32_t PERIOD_MS = 2000;        // search for new decoders
 static const uint32_t SAME_DECODER_MS = 30000; // pause if a decoder answers again
-static const uint8_t TRIES = 2;                // a missed answer gives a wrong bit
+static const uint8_t TRIES = 4;                // a missed answer gives a wrong bit
+// Pause before asking again a question without answer: the 040 DE (ESU)
+// stays silent to about one question in three, in a regular pattern, and
+// a question asked again 30 ms later was lost as well (test bench, 2 Nov:
+// asked again after 70 ms, it answers; never 3 silences in a row)
+static const uint32_t MISS_PAUSE_MS = 70;
 static const uint32_t POWERED_MS = 3000;       // track on before reading the configurations
 static const uint32_t RETRY_MS = 20000;        // a decoder that did not answer is tried again
 
@@ -43,8 +49,9 @@ void Discovery::setup()
 
 /*
  Search: do decoders not yet registered have a UID starting with the first
- `count` bits of `uid`? A "no" is asked twice: one missed answer would give
- a wrong bit (the final check would then fail, and the search restart).
+ `count` bits of `uid`? A "no" is asked TRIES times, MISS_PAUSE_MS apart:
+ one missed answer would give a wrong bit (the final check would then fail,
+ and the search restart).
 
  After an answer, the next question waits ANSWER_PAUSE_MS, as the Gleisbox
  does (130 to 175 ms measured, October 2026; 38 ms only after a "no"): an
@@ -52,6 +59,21 @@ void Discovery::setup()
  30 ms later, which made the search lose a bit every time.
 */
 static const uint32_t ANSWER_PAUSE_MS = 150;
+// Presence: a weak answer counts too (see verifyNext()): a locomotive that
+// runs answers with 34 to 148 regular intervals (its own motor spoils its
+// answer, test bench 2 Nov), the reference window holding at most 22; a
+// locomotive taken off the track gives at most 4, even with another one
+// running fast with its sounds.
+static const uint16_t WEAK_ANSWER_REGULAR = 20;
+static const uint16_t WEAK_ANSWER_MARGIN = 10; // more than in the reference window
+// A reference window with this many regular intervals: the measure is not
+// reliable, a missing answer is not counted against the locomotive
+static const uint16_t NOISY_REFERENCE = 10;
+
+static bool weakAnswer(const Feedback::Result &r)
+{
+    return r.windowRegular >= WEAK_ANSWER_REGULAR && r.windowRegular >= r.referenceRegular + WEAK_ANSWER_MARGIN;
+}
 
 bool Discovery::probe(uint8_t count, uint32_t uid)
 {
@@ -60,11 +82,15 @@ bool Discovery::probe(uint8_t count, uint32_t uid)
     f.search(count, uid);
     f.finish();
     for (uint8_t i = 0; i < TRIES; i++)
+    {
         if (Feedback::ask(f))
         {
             vTaskDelay(pdMS_TO_TICKS(ANSWER_PAUSE_MS));
             return true;
         }
+        if (i + 1 < TRIES)
+            vTaskDelay(pdMS_TO_TICKS(MISS_PAUSE_MS));
+    }
     return false;
 }
 
@@ -89,7 +115,14 @@ bool Discovery::findUid(uint32_t *found)
             continue; // the bit is 1
         uid &= ~(1UL << (32 - count));
         if (!probe(count, uid))
-            return false; // neither 1 nor 0: start again
+        {
+            // neither 1 nor 0: start again (printed, to follow a decoder
+            // that does not complete its search)
+            const uint32_t known = count > 1 ? uid & ~((1UL << (33 - count)) - 1) : 0;
+            Serial.printf("Discovery: search stopped at bit %u (UID so far %08lX, %u bits)\n", count,
+                          (unsigned long)known, count - 1);
+            return false;
+        }
     }
     *found = uid;
     return true;
@@ -137,6 +170,9 @@ bool Discovery::readConfig(uint16_t sid, char *nameOut, size_t size)
     static MfxConfig c; // static: keeps the task stack small (one task only)
     const uint32_t t0 = millis();
     sMoving = false;
+    // Nothing else is printed until the end: about one second per CV
+    // block, a few minutes for a decoder with many functions
+    Serial.printf("Discovery: reading the configuration of address %u (a few minutes)...\n", sid);
     const MfxConfig::Status st = c.read(readFromTrack, (void *)(uintptr_t)sid);
     if (sMoving)
     {
@@ -437,6 +473,178 @@ static void deleteLoco(uint16_t a)
                   Centrale::power() ? "" : " (track off: its decoder keeps the address until the counter changes)");
 }
 
+/*
+ Test bench for the feedback (serial commands M and N): the same requests
+ as in service, repeated, with the counts of each window, to measure what
+ the noise of other locomotives (motors, sounds) does to the answers of
+ this one. Run it with the locomotive on the track (no answer must be
+ missed) and taken off (no answer must be seen).
+*/
+static void printStats(const char *what, uint16_t *v, uint16_t n)
+{
+    // sorted for the median (insertion sort, n <= 500)
+    for (uint16_t i = 1; i < n; i++)
+    {
+        const uint16_t x = v[i];
+        int j = i - 1;
+        while (j >= 0 && v[j] > x)
+        {
+            v[j + 1] = v[j];
+            j--;
+        }
+        v[j + 1] = x;
+    }
+    Serial.printf("  %-22s min %3u  median %3u  max %3u\n", what, v[0], v[n / 2], v[n - 1]);
+}
+
+static void benchAsk(const MfxFrame &f, const char *what, uint16_t n, uint32_t pauseMs = ANSWER_PAUSE_MS)
+{
+    if (n > 500)
+        n = 500;
+    uint16_t *col[6];
+    for (uint8_t k = 0; k < 6; k++)
+        col[k] = (uint16_t *)malloc(n * sizeof(uint16_t));
+    uint16_t answers = 0, weak = 0;
+    uint16_t ends[3] = {0, 0, 0}, endAnswers[3] = {0, 0, 0}; // per end of the request
+    static const char *const END_NAMES[3] = {"none ", "flip ", "pulse"};
+    Serial.printf("\nBench: %u %s, %lu ms between two questions, pulse %u us%s\n", n, what,
+                  (unsigned long)pauseMs + 30, MfxSignal::pulseUs, MfxSignal::answerPulse ? "" : " (off)");
+    Serial.println("  #   window edges/regular/run   reference edges/regular/run   end    decision");
+    for (uint16_t i = 0; i < n; i++)
+    {
+        Feedback::Result r = {};
+        const bool yes = Feedback::ask(f, &r);
+        const bool w = !yes && weakAnswer(r);
+        answers += yes;
+        weak += w;
+        if (col[0])
+        {
+            col[0][i] = r.window < 0 ? 0 : r.window;
+            col[1][i] = r.windowRegular;
+            col[2][i] = r.windowRun;
+            col[3][i] = r.reference < 0 ? 0 : r.reference;
+            col[4][i] = r.referenceRegular;
+            col[5][i] = r.referenceRun;
+        }
+        const uint8_t end = MfxSignal::lastEnd < 3 ? MfxSignal::lastEnd : 0;
+        ends[end]++;
+        endAnswers[end] += yes;
+        Serial.printf("  %3u   %4d / %3u / %3u           %4d / %3u / %3u            %s  %s\n", i + 1, r.window,
+                      r.windowRegular, r.windowRun, r.reference, r.referenceRegular, r.referenceRun,
+                      END_NAMES[end], yes ? "answer" : w ? "weak (counted as present)" : "no answer");
+        vTaskDelay(pdMS_TO_TICKS(pauseMs));
+    }
+    Serial.printf("Bench: %u answers, %u weak, %u no answer, out of %u\n", answers, weak, n - answers - weak, n);
+    for (uint8_t e = 0; e < 3; e++)
+        if (ends[e])
+            Serial.printf("  end %s: %u answers out of %u\n", END_NAMES[e], endAnswers[e], ends[e]);
+    if (col[0] && col[5])
+    {
+        printStats("window edges", col[0], n);
+        printStats("window regular", col[1], n);
+        printStats("window longest run", col[2], n);
+        printStats("reference edges", col[3], n);
+        printStats("reference regular", col[4], n);
+        printStats("reference longest run", col[5], n);
+    }
+    for (uint8_t k = 0; k < 6; k++)
+        free(col[k]);
+}
+
+static void benchVerify(uint16_t a, uint16_t n)
+{
+    Loco *l = Loco::findLoco(a);
+    MfxFrame f;
+    f.address(a);
+    f.verify(l->uid32());
+    f.finish();
+    char what[64];
+    snprintf(what, sizeof(what), "verifies of %s (address %u)", l->name().c_str(), a);
+    benchAsk(f, what, n);
+}
+
+// Search question with the whole UID (32 bits): only the decoder with this
+// UID may answer, if it has no address yet (the 040 DE, for example)
+static void benchSearch(uint32_t uid, uint16_t n, uint32_t pauseMs)
+{
+    MfxFrame f;
+    f.broadcast();
+    f.search(32, uid);
+    f.finish();
+    char what[64];
+    snprintf(what, sizeof(what), "search questions for the UID %08lX", (unsigned long)uid);
+    benchAsk(f, what, n, pauseMs);
+}
+
+/*
+ Search questions for every count from 0 to 32, with the UID given (exact)
+ or with its first `count` bits followed by ones (as the search asks them):
+ up to TRIES tries each, MISS_PAUSE_MS apart. Shows which counts the
+ decoder answers (the 040 DE stops at count 8, 2 Nov).
+*/
+static void benchSweep(uint32_t uid, bool ones)
+{
+    Serial.printf("\nBench: search questions for the UID %08lX, count 0 to 32, %s\n", (unsigned long)uid,
+                  ones ? "the other bits at 1 (as the search)" : "whole UID");
+    uint8_t answered = 0;
+    for (uint8_t count = 0; count <= 32; count++)
+    {
+        uint32_t q = uid;
+        if (ones && count < 32)
+            q |= (count == 0) ? 0xFFFFFFFFUL : ((1UL << (32 - count)) - 1);
+        MfxFrame f;
+        f.broadcast();
+        f.search(count, q);
+        f.finish();
+        uint8_t got = 0;
+        Feedback::Result r = {};
+        for (uint8_t t = 1; t <= TRIES && !got; t++)
+        {
+            if (Feedback::ask(f, &r))
+                got = t;
+            else if (t < TRIES)
+                vTaskDelay(pdMS_TO_TICKS(MISS_PAUSE_MS));
+        }
+        answered += got != 0;
+        if (got)
+            Serial.printf("  count %2u  question %08lX  answer at try %u (%u regular, run %u)\n", count,
+                          (unsigned long)q, got, r.windowRegular, r.windowRun);
+        else
+            Serial.printf("  count %2u  question %08lX  NO ANSWER in %u tries\n", count, (unsigned long)q, TRIES);
+        vTaskDelay(pdMS_TO_TICKS(ANSWER_PAUSE_MS));
+    }
+    Serial.printf("Bench: %u counts answered out of 33\n", answered);
+}
+
+static void benchRead(uint16_t a, uint16_t n)
+{
+    Loco *l = Loco::findLoco(a);
+    if (n > 100)
+        n = 100;
+    uint16_t ok = 0;
+    Serial.printf("\nBench: %u reads of the name of %s (address %u)\n", n, l->name().c_str(), a);
+    for (uint16_t i = 0; i < n; i++)
+    {
+        char name[17];
+        memset(name, 0, sizeof(name));
+        bool good = true;
+        for (uint8_t k = 0; k < 16 && good; k += 2)
+        {
+            uint8_t v[2] = {0, 0};
+            good = Feedback::readCV(a, 3, 1 + k, 2, v);
+            name[k] = (char)v[0];
+            name[k + 1] = (char)v[1];
+            vTaskDelay(pdMS_TO_TICKS(Feedback::READ_PAUSE_MS));
+        }
+        for (uint8_t k = 0; k < 16; k++)
+            if (name[k] != 0 && (name[k] < 0x20 || name[k] >= 0x7F))
+                name[k] = '?';
+        ok += good;
+        Serial.printf("  %3u  %s  \"%s\"\n", i + 1, good ? "ok    " : "failed", good ? name : "");
+    }
+    Serial.printf("Bench: %u reads ok out of %u\n", ok, n);
+}
+
 static void console()
 {
     while (Serial.available() > 0)
@@ -463,13 +671,28 @@ static void console()
         else if (c == 'C')
         {
             // Read the configurations again (a decoder changed, or to test
-            // the reading): forgotten, then read as at start-up
+            // the reading): forgotten, then read as at start-up.
+            // C<address>: this locomotive only (the others are kept)
+            vTaskDelay(pdMS_TO_TICKS(50)); // the rest of the line
+            uint16_t only = 0;
+            while (Serial.available() > 0 && isdigit(Serial.peek()))
+                only = only * 10 + (Serial.read() - '0');
+            if (only != 0 && Loco::findLoco(only) == nullptr)
+            {
+                Serial.printf("\nC%u: no locomotive at this address (L lists them)\n", only);
+                continue;
+            }
             uint16_t list[32];
             const uint8_t count = knownAddresses(list, 32);
             for (uint8_t i = 0; i < count; i++)
                 if (Loco *l = Loco::findLoco(list[i]))
                 {
                     const uint16_t a = list[i];
+                    if (only != 0 && a != only)
+                    {
+                        sReadTries[a] = READ_TRIES; // kept, not read
+                        continue;
+                    }
                     MfxInfo none;
                     memset(&none, 0, sizeof(none));
                     l->mfxInfo(none);
@@ -477,7 +700,10 @@ static void console()
                 }
             LocoStore::save();
             sRereadConfigs = true;
-            Serial.println("\nConfigurations forgotten: read again");
+            if (only)
+                Serial.printf("\nConfiguration of address %u forgotten: read again\n", only);
+            else
+                Serial.println("\nConfigurations forgotten: read again");
         }
         else if (c == 'E')
         {
@@ -507,10 +733,137 @@ static void console()
             else
                 deleteLoco(a);
         }
+        else if (c == 'M' || c == 'N')
+        {
+            // Test bench: M<address>[,count] = count verifies (50), N<address>[,count]
+            // = count reads of the name (10); statistics of the feedback
+            vTaskDelay(pdMS_TO_TICKS(50)); // the rest of the line
+            uint16_t a = 0, n = 0;
+            bool digits = false;
+            while (Serial.available() > 0 && isdigit(Serial.peek()))
+            {
+                a = a * 10 + (Serial.read() - '0');
+                digits = true;
+            }
+            if (Serial.available() > 0 && Serial.peek() == ',')
+            {
+                Serial.read();
+                while (Serial.available() > 0 && isdigit(Serial.peek()))
+                    n = n * 10 + (Serial.read() - '0');
+            }
+            if (!digits || Loco::findLoco(a) == nullptr)
+                Serial.printf("\n%c: %c followed by the address of a known locomotive (L lists them), %c404 or %c404,100\n",
+                              c, c, c, c);
+            else if (!Centrale::power())
+                Serial.println("\nTest bench: the track is off");
+            else if (c == 'M')
+                benchVerify(a, n ? n : 50);
+            else
+                benchRead(a, n ? n : 10);
+        }
+        else if (c == 'S' || c == 'T')
+        {
+            // S<UID in hex>[,count]: search questions with the whole UID (50).
+            // The whole line is read (up to the end of line, 1 s at most):
+            // the letters of the UID must not be taken for commands (E!)
+            char line[24];
+            uint8_t len = 0;
+            const uint32_t t0 = millis();
+            while (millis() - t0 < 1000)
+            {
+                if (Serial.available() == 0)
+                {
+                    vTaskDelay(pdMS_TO_TICKS(5));
+                    continue;
+                }
+                const int ch = Serial.read();
+                if (ch == '\n' || ch == '\r')
+                    break;
+                if (len < sizeof(line) - 1)
+                    line[len++] = (char)ch;
+            }
+            line[len] = 0;
+            uint32_t uid = 0;
+            uint16_t n = 0;
+            uint8_t digits = 0;
+            const char *q = line;
+            for (; isxdigit((unsigned char)*q); q++, digits++)
+                uid = uid << 4 | (uint32_t)(isdigit((unsigned char)*q) ? *q - '0' : (toupper((unsigned char)*q) - 'A' + 10));
+            uint32_t pause = ANSWER_PAUSE_MS;
+            if (*q == ',')
+                for (q++; isdigit((unsigned char)*q); q++)
+                    n = n * 10 + (*q - '0');
+            if (*q == ',')
+            {
+                pause = 0;
+                for (q++; isdigit((unsigned char)*q); q++)
+                    pause = pause * 10 + (*q - '0');
+            }
+            if (digits != 8)
+                Serial.println("\nS: S followed by the 8 hexadecimal digits of the UID, SF9E610E0 or SF9E610E0,100 or SF9E610E0,50,300 (pause in ms);"
+                               " T<UID> = every count, whole UID; T<UID>,1 = every count, the other bits at 1");
+            else if (!Centrale::power())
+                Serial.println("\nTest bench: the track is off");
+            else if (c == 'T')
+                benchSweep(uid, n != 0);
+            else
+                benchSearch(uid, n ? n : 50, pause);
+        }
+        else if (c == 'A')
+        {
+            MfxSignal::answerPulse = !MfxSignal::answerPulse;
+            Serial.printf("\nPulse after the bits 0011 when they end at the window level: %s\n",
+                          MfxSignal::answerPulse ? "on (as the Gleisbox, default)" : "off");
+        }
+        else if (c == 'I')
+        {
+            // Test: I<µs> = length of the pulse after 0011 (I10 = default, about 2 on the Gleisbox)
+            vTaskDelay(pdMS_TO_TICKS(50));
+            uint16_t us = 0;
+            bool digits = false;
+            while (Serial.available() > 0 && isdigit(Serial.peek()))
+            {
+                us = us * 10 + (Serial.read() - '0');
+                digits = true;
+            }
+            if (!digits || us == 0 || us > 100)
+                Serial.printf("\nI: I followed by the pulse length in µs, 1 to 100 (I10 = default), now %u\n",
+                              MfxSignal::pulseUs);
+            else
+            {
+                MfxSignal::pulseUs = us;
+                Serial.printf("\nPulse after the bits 0011: %u µs\n", us);
+            }
+        }
+        else if (c == 'F')
+        {
+            // Test: F<µs> = flip before the answer window after this time
+            // (2 = as the Gleisbox was measured), F0 = no flip
+            vTaskDelay(pdMS_TO_TICKS(50));
+            uint16_t us = 0;
+            bool digits = false;
+            while (Serial.available() > 0 && isdigit(Serial.peek()))
+            {
+                us = us * 10 + (Serial.read() - '0');
+                digits = true;
+            }
+            if (!digits)
+                Serial.printf("\nF: F followed by the time in µs (F2 = default, F0 = no flip), now %u\n",
+                              MfxSignal::answerFlipUs);
+            else
+            {
+                MfxSignal::answerFlipUs = us;
+                Serial.printf("\nFlip before the answer window: %s %u µs\n", us ? "after" : "none", us);
+            }
+        }
         else if (c == '?')
             Serial.printf("\nCommands: R = re-registration of every decoder (counter %u -> %u, restart), "
-                          "V = verify every declared locomotive, L = list the locomotives, C = read the configurations again, "
-                          "D<address> = delete one locomotive (D4), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "V = verify every declared locomotive, L = list the locomotives, C = read the configurations again (C404: one locomotive), "
+                          "D<address> = delete one locomotive (D4), M<address>[,n] = test bench, n verifies (M404,50), "
+                          "N<address>[,n] = test bench, n reads of the name (N404,10), "
+                          "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "
+                          "T<UID>[,1] = test bench, search questions for every count (,1: other bits at 1), "
+                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I10 default), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }
@@ -532,7 +885,6 @@ static void console()
 */
 static const uint32_t ABSENT_RETRY_MS = 60000;
 static const uint8_t ABSENT_MISSES = 3;
-static const uint16_t WEAK_ANSWER_REGULAR = 20;
 
 static void verifyNext()
 {
@@ -563,7 +915,7 @@ static void verifyNext()
         // Presence only: a weak answer counts too (the 241 A answers some
         // queries with 64 or 105 edges instead of 300, 1 Nov; the noise
         // gives at most 5 regular intervals)
-        const bool yes = Feedback::ask(f, &r) || r.windowRegular >= WEAK_ANSWER_REGULAR;
+        const bool yes = Feedback::ask(f, &r) || weakAnswer(r);
         if (yes)
         {
             if (p.absent)
@@ -574,6 +926,8 @@ static void verifyNext()
         }
         else if (p.absent)
             p.since = now;
+        else if (r.referenceRegular >= NOISY_REFERENCE)
+            ; // the reference window is noisy: no conclusion, asked again next turn
         else if (++p.misses >= ABSENT_MISSES)
         {
             Serial.printf("Discovery: %s (address %u) does not answer, queried again every minute\n",
@@ -655,6 +1009,15 @@ static void readForMaster(const MasterOrder &o)
         readFailed(o, 0);
         return;
     }
+    // A running locomotive cannot be read: its own motor spoils its answer
+    // (test bench, 2 Nov: 0 reads out of 10, at speed 12 and 63)
+    if (Loco *running = Loco::findLoco(o.sid))
+        if (running->speed() != 0)
+        {
+            Serial.printf("Discovery: read of CV %u at address %u refused: the locomotive is running\n", o.cv, o.sid);
+            readFailed(o, 0);
+            return;
+        }
     // The name of the decoder (CV 3, index 1, 16 characters), read by the
     // master: kept as the name of the locomotive (shown on an MS2)
     const bool isName = (o.cv == 3 && o.index == 1 && o.count >= 2 && o.count <= 16);
