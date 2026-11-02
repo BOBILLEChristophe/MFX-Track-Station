@@ -799,17 +799,9 @@ static void console()
         }
         else if (c == 'A')
         {
-            MfxSignal::alwaysFlip = !MfxSignal::alwaysFlip;
-            Serial.printf("\nTransition after the bits 0011: %s\n",
-                          MfxSignal::alwaysFlip ? "always (window level follows the frame)"
-                                                : "only to reach the window level (default)");
-        }
-        else if (c == 'P')
-        {
-            MfxSignal::parityFix = !MfxSignal::parityFix;
-            Serial.printf("\nAnswer window always at the same level (half bit before the synchronisations): %s%s\n",
-                          MfxSignal::parityFix ? "on" : "off",
-                          MfxSignal::alwaysFlip ? "" : " (needs A: transition after 0011 always)");
+            MfxSignal::answerPulse = !MfxSignal::answerPulse;
+            Serial.printf("\nPulse after the bits 0011 when they end at the window level: %s\n",
+                          MfxSignal::answerPulse ? "on (as the Gleisbox, default)" : "off");
         }
         else if (c == 'F')
         {
@@ -839,7 +831,7 @@ static void console()
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
                           "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "
                           "T<UID>[,1] = test bench, search questions for every count (,1: other bits at 1), "
-                          "F<us> = flip before the answer window (F2 default, F0 none), A = transition after 0011 always (on/off), P = answer window always at the same level (on/off), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }

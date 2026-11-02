@@ -6,8 +6,7 @@
 
 bool MfxSignal::windowLevel = true;
 uint16_t MfxSignal::answerFlipUs = MfxSignal::FORCE_US;
-bool MfxSignal::alwaysFlip = false;
-bool MfxSignal::parityFix = false;
+bool MfxSignal::answerPulse = true;
 
 void MfxSignal::push(bool level0, bool level1, uint16_t duration0, uint16_t duration1)
 {
@@ -46,20 +45,18 @@ void MfxSignal::request(const uint8_t *insert)
         sync();
         frame(insert);
     }
-    if (alwaysFlip && parityFix && mLevel == windowLevel)
-    {
-        // A half bit at the other level before the synchronisations
-        push(mLevel, !mLevel, FORCE_US, HALF_US);
-        mLevel = !mLevel;
-    }
     for (uint8_t i = 0; i < FEEDBACK_SYNCS; i++)
         sync();
     bit0();
     bit0();
     bit1();
     bit1();
-    if (alwaysFlip)
-        forceLevel(!mLevel, FORCE_US);
+    if (answerPulse && mLevel == windowLevel)
+    {
+        // Already at the window level: a short pulse at the other level all
+        // the same, so that a transition follows the bits 0011 (Gleisbox)
+        push(mLevel, !mLevel, FORCE_US, FORCE_US);
+    }
     else if (answerFlipUs != 0)
         forceLevel(windowLevel, answerFlipUs);
 }
@@ -78,7 +75,7 @@ void MfxSignal::feedbackWindows(uint32_t *windowUs, uint32_t *referenceUs, const
 
     if (windowUs)
         *windowUs = durationUs();
-    const bool answerLevel = mLevel; // windowLevel, unless alwaysFlip
+    const bool answerLevel = mLevel; // windowLevel, unless F0
     hold(FEEDBACK_WINDOW_US);
 
     sync();

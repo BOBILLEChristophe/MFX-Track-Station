@@ -81,18 +81,13 @@ public:
     // (ESU) does not answer when this flip is there (an odd number of
     // stuffed bits in the frame), test bench 2 Nov.
     static uint16_t answerFlipUs;
-    // Test (serial command A): a transition right after the bits 0011
-    // always (2 µs later, as the flip), the answer window then being at the
-    // level it gives. The 040 DE answered only the frames where our flip
-    // was there, whichever window level (test bench, 2 Nov).
-    static bool alwaysFlip;
-    // Test (serial command P), with alwaysFlip: the answer window at
-    // windowLevel all the same. The bits 0011 end at the level the
-    // synchronisations start at: when it is windowLevel, one transition is
-    // added before the synchronisations (a half bit), so that the transition
-    // after 0011 leads to windowLevel. Some decoders (150 X 1518, 150 Y)
-    // answered only at windowLevel, the 040 DE only with the transition.
-    static bool parityFix;
+    // The bits 0011 always followed by a transition, as on the Gleisbox
+    // (recorded with the MS2, 2 Nov 2026: every request, both cases): when
+    // the bits end at windowLevel already, it adds a pulse of about 2 µs at
+    // the other level, the answer window still being at windowLevel. The
+    // 040 DE (ESU) answers only with this transition, the 150 X 1518 and the
+    // 150 Y only at windowLevel. Serial command A switches it off and on.
+    static bool answerPulse;
 
     // Frame inserted between the question and the request (the command
     // station frame: 9 + 6 + 32 + 16 + 8 = 71 bits), at most
