@@ -1,9 +1,9 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 — 2026-11-03
 
 ### Changed
-- **Arduino core 3.3.12 (ESP-IDF 5.5)**, platform pioarduino 55.03.312-1 instead of espressif32@6.9.0 (core 2.0.17): the track signal uses the RMT driver of ESP-IDF 5 (`driver/rmt_tx.h`, copy encoder, one transaction at a time, end level of each chunk set by the transmission), the 1-bit feedback the PCNT driver of ESP-IDF 5 (`driver/pulse_cnt.h`, glitch filter of 1 µs as before). CAN bus: ACAN_ESP32 3.0.3. WiFi: `accept()` instead of `available()` for a new client.
+- **Arduino core 3.3.12 (ESP-IDF 5.5)**, platform pioarduino 55.03.312-1 instead of espressif32@6.9.0 (core 2.0.17): the track signal uses the RMT driver of ESP-IDF 5 (`driver/rmt_tx.h`, copy encoder, one transaction at a time, end level of each chunk set by the transmission), the 1-bit feedback the PCNT driver of ESP-IDF 5 (`driver/pulse_cnt.h`, glitch filter of 1 µs as before). CAN bus: ACAN_ESP32 3.0.3. WiFi: `accept()` instead of `available()` for a new client. Validated on the bench as with 0.12.0: verifies of the 150 Y 17 and the 241 A 200/200 with the pause, 040 DE 50/50, its configuration read in 59 reads at the first try (37.8 s), registration in Rocrail after a deletion, driving.
 
 ## 0.12.0 — 2026-11-03
 
