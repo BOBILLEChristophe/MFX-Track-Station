@@ -29,7 +29,6 @@ Ce projet fait l'objet d'un fil sur le forum 3R : https://forum.3rails.fr/t/cont
 - Écriture des CV.
 - MS2 : demande « langver » (version du fichier de langue) sans réponse ; canaux de mesure (courant, tension, température) comme la Gleisbox.
 - Fonctions F16 et au-delà, réponses à Rocrail (surcharge).
-- Passage au nouveau pilote RMT d'ESP-IDF 5.
 - Circuit imprimé pour le capteur de retour.
 
 ### Matériel requis
@@ -62,7 +61,7 @@ Le capteur (schéma ci-dessous) :
 - **T1** : tore en poudre de fer Micrometals T50-26B. Le fil de voie OUT1 le traverse une fois (un seul des deux fils). Secondaire : 52 spires de fil émaillé soudable 0,20 mm (L ≈ 118 µH).
 - **Circuit accordé** sur environ 53 kHz, la porteuse de la réponse des décodeurs : 68 nF + 6,8 nF (polypropylène) et 150 Ω en parallèle sur le secondaire. Son point bas est à VREF = 1,65 V (pont 10 kΩ / 10 kΩ découplé par 1 µF).
 - **Comparateur** MCP6541 (DIP-8, 3,3 V) avec une hystérésis d'environ ±16 mV (10 kΩ et **1 MΩ**). Sa sortie va sur **GPIO 26** (`FEEDBACK_PIN` dans `src/main.cpp`).
-  *Attention : le schéma ci-dessous montre encore 330 kΩ (±50 mV), la première valeur. Avec 330 kΩ, une réponse faible est perdue dès qu'une deuxième loco est sur la voie (probablement parce que ses condensateurs d'entrée fournissent une partie du courant de la réponse, qui ne passe plus par le tore) : la 241 A ne se lisait plus en présence de la 150 Y. Avec 1 MΩ (essayé avec 3 × 330 kΩ en série), elle se lit sans erreur, et le bruit reste nul quand aucun décodeur ne répond.*
+  *Première valeur : 330 kΩ (±50 mV). Avec 330 kΩ, une réponse faible est perdue dès qu'une deuxième loco est sur la voie (probablement parce que ses condensateurs d'entrée fournissent une partie du courant de la réponse, qui ne passe plus par le tore) : la 241 A ne se lisait plus en présence de la 150 Y. Avec 1 MΩ (essayé avec 3 × 330 kΩ en série), elle se lit sans erreur, et le bruit reste nul quand aucun décodeur ne répond.*
 
 Le +3,3 V et la masse sont ceux de l'ESP32 ; le tore isole le capteur de la voie.
 
@@ -114,7 +113,7 @@ Banc de test du retour (pour mettre au point la détection, deux locomotives au 
 
 ### Compilation
 
-Le projet se compile avec PlatformIO. La plateforme est figée (`espressif32@6.9.0`, core Arduino 2.0.17) dans `platformio.ini`.
+Le projet se compile avec PlatformIO. La plateforme est figée dans `platformio.ini` : pioarduino 55.03.312-1, core Arduino 3.3.12 (ESP-IDF 5.5), avec les pilotes RMT et PCNT d'ESP-IDF 5. La plateforme officielle `espressif32` s'arrête au core 2.0.17 ; la version 0.12.0 est la dernière pour ce core (`espressif32@6.9.0`). La première compilation télécharge la plateforme (environ 1 Go).
 
 ### Configuration du WiFi
 
@@ -144,7 +143,7 @@ L'UID se lit par exemple avec une MS2 et l'exemple `MfxObserver` de [Railuino](h
 
 ### Bus CAN et MS2
 
-La centrale a le bus CAN Märklin (250 kbit/s, identifiants de 29 bits) de la Box : RX sur GPIO 4, TX sur GPIO 5, avec un transceiver CAN 3,3 V. La bibliothèque est ACAN_ESP32 de Pierre Molinaro, version 1.1.2 (les versions 1.2 et suivantes demandent le cœur Arduino 3). Une **MS2** se branche sur ce bus comme sur une Gleisbox, et **pilote la centrale en esclave** pendant que Rocrail reste le maître.
+La centrale a le bus CAN Märklin (250 kbit/s, identifiants de 29 bits) de la Box : RX sur GPIO 4, TX sur GPIO 5, avec un transceiver CAN 3,3 V. La bibliothèque est ACAN_ESP32 de Pierre Molinaro, version 3.0.3 (pour le cœur Arduino 3 ; 1.1.2 avec le cœur 2.0). Une **MS2** se branche sur ce bus comme sur une Gleisbox, et **pilote la centrale en esclave** pendant que Rocrail reste le maître.
 
 **Passerelle, comme une CS2.** Chaque trame de Rocrail est recopiée sur le bus, chaque trame du bus est transmise à Rocrail. La centrale exécute les ordres venus de l'un ou de l'autre (vitesse, sens, fonctions, arrêt d'urgence d'une locomotive, Stop et Go) et y répond comme une Gleisbox : un ordre est confirmé (mêmes octets, bit de réponse), une question reçoit l'état de la locomotive. Rocrail suit donc ce qui est fait sur la MS2 (curseur de vitesse, fonctions), et inversement.
 

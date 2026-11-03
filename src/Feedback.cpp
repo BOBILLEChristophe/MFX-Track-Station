@@ -2,8 +2,8 @@
 
    Feedback.cpp
 
-   PCNT (pulse counter) and esp_timer, ESP-IDF 4.4 API (Arduino core 2.0.x).
-   With the move to the core 3.x, the PCNT will go to driver/pulse_cnt.h.
+   PCNT (pulse counter, driver/pulse_cnt.h) and esp_timer, ESP-IDF 5 API
+   (Arduino core 3.x). Up to version 0.12.0: the legacy driver/pcnt.h.
 
    Data feedback: the rising edges are timed with the cycle counter of the
    CPU, in the interrupt (always on the core that called setup()).
@@ -15,21 +15,15 @@
 #include "MfxSignal.h"
 #include "MfxDemod.h"
 #include "MfxFrame.h"
-#include "driver/pcnt.h"
+#include "driver/pulse_cnt.h"
 #include "esp_timer.h"
 #include "driver/gpio.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/queue.h"
 #include "freertos/semphr.h"
 
-#include "esp_idf_version.h"
-#if ESP_IDF_VERSION_MAJOR >= 5
 #include "esp_cpu.h"
 #define CYCLES() esp_cpu_get_cycle_count()
-#else
-#include "hal/cpu_hal.h"
-#define CYCLES() cpu_hal_get_cycle_count()
-#endif
 
 bool Feedback::sReady = false;
 bool Feedback::sTrace = false;
@@ -37,7 +31,7 @@ uint32_t Feedback::readTries = 0;
 uint32_t Feedback::readRetried = 0;
 bool Feedback::sTraceSearch = false;
 
-static const pcnt_unit_t UNIT = PCNT_UNIT_0;
+static pcnt_unit_handle_t sUnit = NULL; // counts the rising edges of the comparator
 
 // A request for the signal task: a frame, and the kind of feedback
 struct Request
@@ -130,28 +124,25 @@ static void IRAM_ATTR onEdge()
 
 void Feedback::setup(gpio_num_t pin)
 {
-    pcnt_config_t cfg = {};
-    cfg.pulse_gpio_num = pin;
-    cfg.ctrl_gpio_num = PCNT_PIN_NOT_USED;
-    cfg.channel = PCNT_CHANNEL_0;
-    cfg.unit = UNIT;
-    cfg.pos_mode = PCNT_COUNT_INC; // rising edge: +1
-    cfg.neg_mode = PCNT_COUNT_DIS; // falling edge: nothing
-    cfg.lctrl_mode = PCNT_MODE_KEEP;
-    cfg.hctrl_mode = PCNT_MODE_KEEP;
-    cfg.counter_h_lim = 32767;
-    cfg.counter_l_lim = -32768;
-    if (pcnt_unit_config(&cfg) != ESP_OK)
+    pcnt_unit_config_t unitCfg = {};
+    unitCfg.high_limit = 32767;
+    unitCfg.low_limit = -32768;
+    pcnt_chan_config_t chanCfg = {};
+    chanCfg.edge_gpio_num = pin;
+    chanCfg.level_gpio_num = -1; // no control input
+    pcnt_channel_handle_t chan = NULL;
+    // Ignores pulses shorter than 1 µs (80 APB cycles at 80 MHz, as before)
+    pcnt_glitch_filter_config_t filter = {};
+    filter.max_glitch_ns = 1000;
+    if (pcnt_new_unit(&unitCfg, &sUnit) != ESP_OK || pcnt_new_channel(sUnit, &chanCfg, &chan) != ESP_OK ||
+        // rising edge: +1, falling edge: nothing
+        pcnt_channel_set_edge_action(chan, PCNT_CHANNEL_EDGE_ACTION_INCREASE, PCNT_CHANNEL_EDGE_ACTION_HOLD) != ESP_OK ||
+        pcnt_unit_set_glitch_filter(sUnit, &filter) != ESP_OK || pcnt_unit_enable(sUnit) != ESP_OK ||
+        pcnt_unit_clear_count(sUnit) != ESP_OK || pcnt_unit_start(sUnit) != ESP_OK)
     {
         Serial.println("Feedback: PCNT error, feedback disabled");
         return;
     }
-    // Ignores pulses shorter than 1 µs (80 APB cycles at 80 MHz)
-    pcnt_set_filter_value(UNIT, 80);
-    pcnt_filter_enable(UNIT);
-    pcnt_counter_pause(UNIT);
-    pcnt_counter_clear(UNIT);
-    pcnt_counter_resume(UNIT);
 
     for (uint8_t i = 0; i < STEPS; i++)
     {
@@ -196,21 +187,21 @@ void Feedback::setup(gpio_num_t pin)
 void Feedback::onTimer(void *arg)
 {
     const uint8_t step = (uint8_t)(uintptr_t)arg;
-    int16_t edges = 0;
+    int edges = 0;
     switch (step)
     {
     case CLEAR_WINDOW:
     case CLEAR_REFERENCE:
         if (step == CLEAR_WINDOW)
             scope(false, true);
-        pcnt_counter_clear(UNIT);
+        pcnt_unit_clear_count(sUnit);
         sRegular = 0;
         sRun = 0;
         sRunMax = 0;
         sCountRegular = true;
         break;
     case READ_WINDOW:
-        pcnt_get_counter_value(UNIT, &edges);
+        pcnt_unit_get_count(sUnit, &edges);
         sCountRegular = false;
         sWindowEdges = edges;
         sWindowRegular = sRegular;
@@ -228,7 +219,7 @@ void Feedback::onTimer(void *arg)
         break;
     case READ_REFERENCE:
     {
-        pcnt_get_counter_value(UNIT, &edges);
+        pcnt_unit_get_count(sUnit, &edges);
         sCountRegular = false;
         scope(false, false);
         Result r = {};

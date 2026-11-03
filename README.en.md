@@ -29,7 +29,6 @@ This project has a thread on the 3R forum (in French): https://forum.3rails.fr/t
 - Writing of CVs.
 - MS2: request "langver" (version of the language file) not answered; measurement channels (current, voltage, temperature) as the Gleisbox.
 - Functions F16 and above, answers to Rocrail (overload).
-- Move to the new RMT driver of ESP-IDF 5.
 - Printed circuit board for the feedback sensor.
 
 ### Hardware
@@ -62,7 +61,7 @@ The sensor (schematic below):
 - **T1**: Micrometals T50-26B iron powder toroid. The track wire OUT1 goes through it once (only one of the two wires). Secondary: 52 turns of 0.20 mm solderable enamelled wire (L ≈ 118 µH).
 - **Tuned circuit** at about 53 kHz, the carrier of the answer of the decoders: 68 nF + 6.8 nF (polypropylene) and 150 Ω in parallel with the secondary. Its low end is at VREF = 1.65 V (10 kΩ / 10 kΩ divider decoupled by 1 µF).
 - **Comparator** MCP6541 (DIP-8, 3.3 V) with a hysteresis of about ±16 mV (10 kΩ and **1 MΩ**). Its output goes to **GPIO 26** (`FEEDBACK_PIN` in `src/main.cpp`).
-  *Note: the schematic below still shows 330 kΩ (±50 mV), the first value. With 330 kΩ, a weak answer is lost as soon as a second loco is on the track (probably because its input capacitors supply part of the current of the answer, which no longer goes through the toroid): the 241 A could no longer be read with the 150 Y on the track. With 1 MΩ (tried with 3 × 330 kΩ in series), it is read without error, and the noise stays at zero when no decoder answers.*
+  *First value: 330 kΩ (±50 mV). With 330 kΩ, a weak answer is lost as soon as a second loco is on the track (probably because its input capacitors supply part of the current of the answer, which no longer goes through the toroid): the 241 A could no longer be read with the 150 Y on the track. With 1 MΩ (tried with 3 × 330 kΩ in series), it is read without error, and the noise stays at zero when no decoder answers.*
 
 The +3.3 V and the ground are those of the ESP32; the toroid isolates the sensor from the track.
 
@@ -114,7 +113,7 @@ Test bench of the feedback (to tune the detection, two locomotives at most on th
 
 ### Building
 
-The project builds with PlatformIO. The platform is pinned (`espressif32@6.9.0`, Arduino core 2.0.17) in `platformio.ini`.
+The project builds with PlatformIO. The platform is pinned in `platformio.ini`: pioarduino 55.03.312-1, Arduino core 3.3.12 (ESP-IDF 5.5), with the RMT and PCNT drivers of ESP-IDF 5. The official `espressif32` platform stops at the core 2.0.17; version 0.12.0 is the last one for that core (`espressif32@6.9.0`). The first build downloads the platform (about 1 GB).
 
 ### WiFi setup
 
@@ -144,7 +143,7 @@ The UID can be read for example with an MS2 and the `MfxObserver` example of [Ra
 
 ### CAN bus and MS2
 
-The command station has the Märklin CAN bus (250 kbit/s, 29-bit identifiers) of the Box: RX on GPIO 4, TX on GPIO 5, with a 3.3 V CAN transceiver. The library is ACAN_ESP32 by Pierre Molinaro, version 1.1.2 (versions 1.2 and later need the Arduino core 3). An **MS2** connects to this bus as to a Gleisbox, and **drives the command station as a slave** while Rocrail stays the master.
+The command station has the Märklin CAN bus (250 kbit/s, 29-bit identifiers) of the Box: RX on GPIO 4, TX on GPIO 5, with a 3.3 V CAN transceiver. The library is ACAN_ESP32 by Pierre Molinaro, version 3.0.3 (for the Arduino core 3; 1.1.2 with the core 2.0). An **MS2** connects to this bus as to a Gleisbox, and **drives the command station as a slave** while Rocrail stays the master.
 
 **Gateway, as a CS2.** Each frame of Rocrail is copied to the bus, each frame of the bus is passed to Rocrail. The command station executes the orders of either side (speed, direction, functions, emergency stop of a locomotive, Stop and Go) and answers as a Gleisbox: an order is confirmed (same bytes, response bit), a request gets the state of the locomotive. Rocrail therefore follows what is done on the MS2 (speed slider, functions), and the other way round.
 

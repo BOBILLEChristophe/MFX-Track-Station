@@ -1,8 +1,14 @@
 # Changelog
 
-## Unreleased
+## 0.13.0 — 2026-11-03
 
 ### Changed
+- **Arduino core 3.3.12 (ESP-IDF 5.5)**, platform pioarduino 55.03.312-1 instead of espressif32@6.9.0 (core 2.0.17): the track signal uses the RMT driver of ESP-IDF 5 (`driver/rmt_tx.h`, copy encoder, one transaction at a time, end level of each chunk set by the transmission), the 1-bit feedback the PCNT driver of ESP-IDF 5 (`driver/pulse_cnt.h`, glitch filter of 1 µs as before). CAN bus: ACAN_ESP32 3.0.3. WiFi: `accept()` instead of `available()` for a new client. Validated on the bench as with 0.12.0: verifies of the 150 Y 17 and the 241 A 200/200 with the pause, 040 DE 50/50, its configuration read in 59 reads at the first try (37.8 s), registration in Rocrail after a deletion, driving.
+
+## 0.12.0 — 2026-11-03
+
+### Changed
+- Schematic of the feedback sensor: R5 = 1 MΩ (hysteresis ±16 mV) instead of 330 kΩ, the value in use since October.
 - **Pause of 1.5 ms after each frame, as the Gleisbox** (`RMTChannel::framePause`, on by default): the Gleisbox with an MS2 leaves the track at rest for 1 to 2 ms after nearly every frame (1667 pauses in 30 s, sniffer), our station sent synchronisations without a break. Without the pause the Märklin decoders (mLD3/mSD3) of the 150 Y 17 and the 241 A missed 10 to 15 % of the questions, search as well as verify; with it, 400 verifies out of 400 (scenario `Y`). Ruled out before: the form of the request, the length of the address (7, 11, 14 bits), the refresh of the other locomotives, the track voltage (38.8 V peak to peak, as the Gleisbox).
 - Test bench: scenarios `X` (refresh on/off) and `Y` (pause off/on) alternate two settings over many verifies and print a summary; `B<addr>,<new>` moves a locomotive to another address; `Q` stops the refresh; `H` switches the pause off and on.
 - Reading of CVs: the counts of the tries on the track are printed (end of a configuration read, each read for the master). With the pulse of 10 µs after 0011, every read of the 040 DE succeeds at the first try (108 tries for 59 reads of 2 or 4 bytes, 0 repeated; 37.6 s instead of 85 s with the pulse of 2 µs, when about one read in two needed a second try), and so do the reads of Rocrail for the 150 X 1518.
