@@ -13,7 +13,7 @@
 #pragma once
 
 #include <Arduino.h>
-#include "driver/rmt.h"
+#include "driver/rmt_tx.h"
 #include "MfxSignal.h"
 
 extern QueueHandle_t mfxQueue;
@@ -37,6 +37,6 @@ private:
     static int64_t send(const MfxSignal &signal); // returns the start time (µs)
 
     // Two buffers: one is being sent while the next chunk is built in the other
-    static rmt_item32_t sItems[2][MfxSignal::MAX_ITEMS];
+    static rmt_symbol_word_t sItems[2][MfxSignal::MAX_ITEMS];
     static uint8_t sCurrent;
 };

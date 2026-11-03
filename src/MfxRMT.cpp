@@ -7,14 +7,16 @@
    every 100 µs (except inside a synchronisation pattern).
 
    - signalTask() builds the next chunk while the current one is being sent:
-     rmt_write_items(..., false) waits for the end of the previous chunk, then
-     starts the new one at once.
+     rmt_transmit() waits for the end of the previous chunk (a queue of one
+     transaction), then starts the new one at once.
+   - RMT driver of ESP-IDF 5 (driver/rmt_tx.h, Arduino core 3.x), which
+     replaces the legacy one (driver/rmt.h) used up to version 0.12.0.
    - A chunk is either a frame between two synchronisations, or a single
      synchronisation when there is nothing to send.
-   - Between two chunks the RMT is briefly idle (a few tens of µs). Its idle
-     level is set to the level of the end of the chunk being sent, so the
-     line keeps its level: no spurious transition, only the last half-bit
-     of a synchronisation is a little longer.
+   - Between two chunks the RMT is briefly idle (a few tens of µs). Each
+     chunk ends at its own last level (eot_level of the transmission), so
+     the line keeps its level: no spurious transition, only the last
+     half-bit of a synchronisation is a little longer.
    - A feedback request (Feedback.h) is sent before the other frames. The
      time at which its chunk starts is handed to Feedback, which counts the
      decoder answer in the windows (1-bit feedback) or times the edges of
@@ -35,37 +37,59 @@
 #include "MfxFrame.h"
 #include "esp_timer.h"
 #include "esp_rom_gpio.h" // esp_rom_gpio_pad_select_gpio, esp_rom_gpio_connect_out_signal
+#include "driver/gpio.h"
+#include "driver/rmt_encoder.h"
+#include "soc/gpio_sig_map.h" // RMT_SIG_OUT0_IDX
+#include "soc/soc_caps.h"     // SOC_RMT_MEM_WORDS_PER_CHANNEL
 
-#define RMT_CLOCK_DIVIDER 80 // 80 MHz / 80 = 1 µs per tick
+#define RMT_RESOLUTION_HZ 1000000 // 1 µs per tick
 
-rmt_item32_t RMTChannel::sItems[2][MfxSignal::MAX_ITEMS];
+rmt_symbol_word_t RMTChannel::sItems[2][MfxSignal::MAX_ITEMS];
 uint8_t RMTChannel::sCurrent = 0;
+
+static rmt_channel_handle_t sChannel = NULL;
+static rmt_encoder_handle_t sEncoder = NULL; // copies the items as they are
+
+static void fatal(const char *what, esp_err_t err)
+{
+    Serial.printf("MfxRMT: %s failed (%s), no track signal\n", what, esp_err_to_name(err));
+    while (1)
+        vTaskDelay(pdMS_TO_TICKS(1000));
+}
 
 void RMTChannel::setup(gpio_num_t IN1_pin, gpio_num_t IN2_pin)
 {
-    rmt_config_t config = {};
-    config.rmt_mode = RMT_MODE_TX;
-    config.channel = RMT_CHANNEL_0;
-    config.clk_div = RMT_CLOCK_DIVIDER;
-    config.gpio_num = (gpio_num_t)IN1_pin;
-    config.tx_config.idle_output_en = true;
-    config.tx_config.idle_level = RMT_IDLE_LEVEL_LOW;
+    rmt_tx_channel_config_t config = {};
+    config.gpio_num = IN1_pin;
+    config.clk_src = RMT_CLK_SRC_DEFAULT; // APB, 80 MHz
+    config.resolution_hz = RMT_RESOLUTION_HZ;
     // The 8 blocks of 64 items (the whole RMT memory, no other channel is
     // used): the longest chunk (MfxSignal::MAX_ITEMS = 434, a frame with
     // the command station frame and a data feedback of 8 bytes) fits in the
     // RMT memory (512 items), with room for the end marker: no refill by
-    // interrupt during the transmission.
-    config.mem_block_num = 8;
+    // interrupt during the transmission. The channel is then channel 0.
+    config.mem_block_symbols = 8 * SOC_RMT_MEM_WORDS_PER_CHANNEL;
+    // One transaction at a time: rmt_transmit() returns when the chunk has
+    // started, the next call waits for its end (as rmt_write_items did)
+    config.trans_queue_depth = 1;
+    config.flags.init_level = 0;
+    esp_err_t err = rmt_new_tx_channel(&config, &sChannel);
+    if (err != ESP_OK)
+        fatal("rmt_new_tx_channel", err);
+    rmt_copy_encoder_config_t copy = {};
+    err = rmt_new_copy_encoder(&copy, &sEncoder);
+    if (err != ESP_OK)
+        fatal("rmt_new_copy_encoder", err);
+    err = rmt_enable(sChannel);
+    if (err != ESP_OK)
+        fatal("rmt_enable", err);
 
-    // Signal inversé : IN2 reçoit la sortie du RMT, inversée par la matrice GPIO.
-    // esp_rom_gpio_* existe avec le core Arduino 2.x (ESP-IDF 4.4) comme 3.x (ESP-IDF 5),
-    // contrairement à GPIO_PIN_MUX_REG et gpio_matrix_out, retirés du core 3.x.
+    // Inverted signal: IN2 gets the output of the RMT channel 0, inverted
+    // by the GPIO matrix (the whole memory is taken: it can only be channel 0)
     gpio_num_t gpioNum = (gpio_num_t)(IN2_pin);
     esp_rom_gpio_pad_select_gpio(gpioNum);
     gpio_set_direction(gpioNum, GPIO_MODE_OUTPUT);
-    esp_rom_gpio_connect_out_signal(gpioNum, RMT_SIG_OUT0_IDX + RMT_CHANNEL_0, true, false);
-    rmt_config(&config);
-    rmt_driver_install(config.channel, 0, ESP_INTR_FLAG_SHARED);
+    esp_rom_gpio_connect_out_signal(gpioNum, RMT_SIG_OUT0_IDX, true, false);
 
     // The queue is normally created in setup(); create it here only if it is missing
     if (mfxQueue == NULL)
@@ -85,7 +109,7 @@ void RMTChannel::setup(gpio_num_t IN1_pin, gpio_num_t IN2_pin)
 */
 int64_t RMTChannel::send(const MfxSignal &signal)
 {
-    rmt_item32_t *items = sItems[sCurrent];
+    rmt_symbol_word_t *items = sItems[sCurrent];
     const uint16_t n = signal.count();
     for (uint16_t i = 0; i < n; i++)
     {
@@ -96,13 +120,14 @@ int64_t RMTChannel::send(const MfxSignal &signal)
         items[i].duration1 = it.duration1;
     }
 
+    // If the next chunk is a little late, the line keeps the level this
+    // chunk ends with
+    rmt_transmit_config_t tx = {};
+    tx.loop_count = 0;
+    tx.flags.eot_level = signal.level() ? 1 : 0;
     // Waits for the end of the previous chunk, then starts this one
-    rmt_write_items(RMT_CHANNEL_0, items, n, false);
+    rmt_transmit(sChannel, sEncoder, items, n * sizeof(rmt_symbol_word_t), &tx);
     const int64_t start = esp_timer_get_time();
-
-    // While this chunk is being sent: if the next one is a little late, the
-    // line keeps the level this chunk ends with.
-    rmt_set_idle_level(RMT_CHANNEL_0, true, signal.level() ? RMT_IDLE_LEVEL_HIGH : RMT_IDLE_LEVEL_LOW);
 
     sCurrent ^= 1; // the other buffer is free again only after this chunk ends
     return start;

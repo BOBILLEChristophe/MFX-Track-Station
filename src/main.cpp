@@ -164,7 +164,11 @@ bool readRocrailFrame(uint8_t *buf, size_t len)
   {
     if (client)
       client.stop();
+#if defined(WIFI)
+    client = server.accept(); // available() in the core 2.x, renamed in the core 3.x
+#else
     client = server.available();
+#endif
     if (!client)
       return false;
     Serial.println("Rocrail connected.");
@@ -192,7 +196,9 @@ void setup()
   Serial.printf("\nVersion   :    %s", VERSION);
   Serial.printf("\nAuteur    :    %s", AUTHOR);
   Serial.printf("\nFichier   :    %s", __FILE__);
-  Serial.printf("\nCompiled  :    %s\n\n", BUILD_DATE);
+  Serial.printf("\nCompiled  :    %s", BUILD_DATE);
+  Serial.printf("\nCore      :    Arduino %d.%d.%d, ESP-IDF %s\n\n", ESP_ARDUINO_VERSION_MAJOR, ESP_ARDUINO_VERSION_MINOR,
+                ESP_ARDUINO_VERSION_PATCH, esp_get_idf_version());
 
   // Create MFX message queue (10 * 'BUFFER_SIZE'(100) octets)
   mfxQueue = xQueueCreate(10, BUFFER_SIZE);
