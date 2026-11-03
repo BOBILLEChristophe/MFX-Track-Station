@@ -716,6 +716,28 @@ static void scenarioRefresh(uint16_t a, uint16_t rounds, uint16_t per, bool paus
     f.address(a);
     f.verify(l->uid32());
     f.finish();
+    // Orders of the master waiting (a bind of a locomotive just found): done
+    // first, or the decoder would stay without its address for the whole
+    // scenario (3 Nov: the 040 found, bound by Rocrail, then 0/400)
+    Discovery::masterOrders();
+    // The locomotive must answer before 80 s of questions: a few verifies,
+    // stop at the first answer
+    bool here = false;
+    for (uint8_t i = 0; i < 5 && !here; i++)
+    {
+        here = Feedback::ask(f);
+        if (!here)
+            vTaskDelay(pdMS_TO_TICKS(MISS_PAUSE_MS));
+    }
+    if (!here)
+    {
+        Serial.printf("\nScenario: %s (address %u) does not answer 5 verifies, scenario not started.\n"
+                      "  Is it on the track? If it was deleted from Rocrail (or from the station), its decoder\n"
+                      "  has no address any more: leave it on the track, wait for the line\n"
+                      "  \"Discovery: bind of ... by the master, done\" (Rocrail registers it), then start again.\n",
+                      l->name().c_str(), a);
+        return;
+    }
     const bool wasQuiet = Message::quiet, wasPause = RMTChannel::framePause;
     static const char *const NAMES[2][2] = {{"refresh on ", "refresh off"}, {"no pause   ", "pause      "}};
     uint32_t got[2] = {0, 0}, asked[2] = {0, 0};
