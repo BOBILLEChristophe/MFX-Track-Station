@@ -1148,9 +1148,9 @@ static void readFailed(const MasterOrder &o, uint8_t from)
 /*
  Registration by the master, end. After the bind, Rocrail reads the name and
  CVs 2 to 70, then asks a verify; the answer makes it create the locomotive
- in its list. With the ESU decoders (040 DE, Serie 150X) it never asked the
- verify (2 Nov 2026, 3 tries each), with the Marklin 241 A it always did:
- the decision is in Rocrail. When the master bound a decoder, read it and
+ in its list. With the 040 DE, the Serie 150X and the 150 X 1518 it never
+ asked the verify (2-3 Nov 2026), with the 241 A it always did: the
+ decision is in Rocrail. When the master bound a decoder, read it and
  asked nothing more for PENDING_VERIFY_MS, the command station verifies the
  decoder itself and gives the answer to the master, as if it had asked.
  Rocrail then creates the locomotive (or finds it by its address).
