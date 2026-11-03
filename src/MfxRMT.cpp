@@ -108,7 +108,7 @@ int64_t RMTChannel::send(const MfxSignal &signal)
     return start;
 }
 
-volatile bool RMTChannel::framePause = false;
+volatile bool RMTChannel::framePause = true;
 
 void RMTChannel::signalTask(void *parameter)
 {

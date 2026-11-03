@@ -996,7 +996,7 @@ static void console()
         else if (c == 'H')
         {
             RMTChannel::framePause = !RMTChannel::framePause;
-            Serial.printf("\nPause of %u us after each frame (as the Gleisbox): %s\n", MfxSignal::END_HOLD_US,
+            Serial.printf("\nPause of %u us after each frame (as the Gleisbox, default): %s\n", MfxSignal::END_HOLD_US,
                           RMTChannel::framePause ? "on" : "off");
         }
         else if (c == 'Q')
