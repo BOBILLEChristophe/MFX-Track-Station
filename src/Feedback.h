@@ -95,6 +95,10 @@ public:
     // Returns true if the answer was received with a good checksum.
     // Blocks about 60 to 250 ms. Several tasks may call it.
     static bool readCV(uint16_t sid, uint16_t cv, uint8_t index, uint8_t bytes, uint8_t *out);
+    // Counts of readCV() since the start: tries sent on the track (the first
+    // one and the repeats) and reads that needed more than one try
+    static uint32_t readTries;
+    static uint32_t readRetried;
 
     // Serial port trace. cv: one line per CV read (and the details of a
     // failed answer). search: the edge counts of each 1-bit request (two

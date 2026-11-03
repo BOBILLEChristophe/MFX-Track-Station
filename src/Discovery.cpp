@@ -170,6 +170,7 @@ bool Discovery::readConfig(uint16_t sid, char *nameOut, size_t size)
 {
     static MfxConfig c; // static: keeps the task stack small (one task only)
     const uint32_t t0 = millis();
+    const uint32_t tries0 = Feedback::readTries, retried0 = Feedback::readRetried;
     sMoving = false;
     // Nothing else is printed until the end: about one second per CV
     // block, a few minutes for a decoder with many functions
@@ -257,7 +258,9 @@ bool Discovery::readConfig(uint16_t sid, char *nameOut, size_t size)
     if (const MfxConfig::Block *f = c.block(0x04))
         Serial.printf("  block 04: %u groups of %u CAs, %u functions read\n", f->groups, f->perGroup,
                       c.functionCount);
-    Serial.printf("  %u reads, %u failed, %.1f s", c.reads, c.failures, (millis() - t0) / 1000.0f);
+    Serial.printf("  %u reads, %u failed, %.1f s; on the track %lu tries, %lu reads needed more than one",
+                  c.reads, c.failures, (millis() - t0) / 1000.0f, (unsigned long)(Feedback::readTries - tries0),
+                  (unsigned long)(Feedback::readRetried - retried0));
     for (uint8_t i = 0; i < c.failures && i < MfxConfig::MAX_FAILED; i++)
         Serial.printf("%s %03X/%02X", i ? "," : " (failed:", c.failedCv[i], c.failedIndex[i]);
     Serial.println(c.failures ? ")" : "");
@@ -1198,6 +1201,7 @@ static void readForMaster(const MasterOrder &o)
     const bool isName = (o.cv == 3 && o.index == 1 && o.count >= 2 && o.count <= 16);
     char name[17];
     memset(name, 0, sizeof(name));
+    const uint32_t tries0 = Feedback::readTries;
     uint8_t done = 0;
     while (done < o.count)
     {
@@ -1235,8 +1239,8 @@ static void readForMaster(const MasterOrder &o)
             LocoStore::save();
         }
     }
-    Serial.printf("Discovery: CV %u index %u..%u at address %u read for the master\n", o.cv, o.index,
-                  o.index + o.count - 1, o.sid);
+    Serial.printf("Discovery: CV %u index %u..%u at address %u read for the master (%lu tries on the track)\n",
+                  o.cv, o.index, o.index + o.count - 1, o.sid, (unsigned long)(Feedback::readTries - tries0));
 }
 
 // The locomotive with this UID, at address sid (created or moved there)
