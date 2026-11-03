@@ -294,6 +294,32 @@ void test_verify_frame()
         TEST_ASSERT_EQUAL_MESSAGE(expected[i] == '1', f.bitAt(i), "bit of the verify frame");
 }
 
+// Krauss 3.1.6: 100 NNNNNNN 0 F, one function (F16 and beyond)
+void test_single_function_frame()
+{
+    MfxFrame f;
+    f.address(5);
+    f.function(20, true);
+    f.finish();
+    const char *expected = "100000101" "100" "0010100" "0" "1";
+    TEST_ASSERT_EQUAL_UINT8(strlen(expected) + 8, f.size());
+    for (uint8_t i = 0; i < strlen(expected); i++)
+        TEST_ASSERT_EQUAL_MESSAGE(expected[i] == '1', f.bitAt(i), "bit of the function frame");
+    // the CRC is the one of the bits before it
+    uint8_t crc = 0;
+    for (uint8_t i = 0; i < 8; i++)
+        crc = (uint8_t)((crc << 1) | (f.bitAt(strlen(expected) + i) ? 1 : 0));
+    TEST_ASSERT_EQUAL_HEX8(MfxFrame::crc(f, strlen(expected)), crc);
+
+    MfxFrame g;
+    g.address(5);
+    g.function(127, false);
+    g.finish();
+    const char *expected2 = "100000101" "100" "1111111" "0" "0";
+    for (uint8_t i = 0; i < strlen(expected2); i++)
+        TEST_ASSERT_EQUAL_MESSAGE(expected2[i] == '1', g.bitAt(i), "bit of the function frame F127");
+}
+
 void test_count_codes()
 {
     TEST_ASSERT_EQUAL_UINT8(0, MfxFrame::countCode(1));
@@ -373,6 +399,7 @@ int main()
     RUN_TEST(test_search_frame);
     RUN_TEST(test_read_cv_frames_as_recorded);
     RUN_TEST(test_verify_frame);
+    RUN_TEST(test_single_function_frame);
     RUN_TEST(test_count_codes);
     RUN_TEST(test_buffer_too_small_and_overflow);
     return UNITY_END();

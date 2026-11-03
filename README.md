@@ -12,7 +12,7 @@ Ce projet fait l'objet d'un fil sur le forum 3R : https://forum.3rails.fr/t/cont
 
 ### Ce qui fonctionne aujourd'hui
 
-- **Signal mfx** généré par le RMT de l'ESP32 : vitesse (127 crans), direction et fonctions F0 à F15.
+- **Signal mfx** généré par le RMT de l'ESP32 : vitesse (127 crans), direction et fonctions F0 à F31 : F0 à F15 avec la vitesse, F16 et au-delà une par une (commande `100`, Krauss 3.1.6), envoyées aussitôt puis répétées à tour de rôle par le rafraîchissement.
 - **Pilotage depuis Rocrail** en WiFi, avec le protocole de la CS2 (port TCP 15731). Rocrail peut se déconnecter et se reconnecter sans redémarrer la centrale.
 - **La centrale se comporte comme une Gleisbox Märklin**, et Rocrail (option **Master** du pilote MBUS) comme la MS2 : posez une locomotive mfx sur la voie, la centrale la trouve et la signale à Rocrail, qui lui donne une adresse, lit son nom et **crée la locomotive dans sa liste**. Rien à déclarer, ni dans `src/main.cpp`, ni à la main dans Rocrail (pensez seulement à enregistrer le plan). Essayé avec quatre locomotives (deux décodeurs ESU, deux Märklin).
 - **Plusieurs locomotives** (16 au plus pilotées en même temps).
@@ -28,7 +28,7 @@ Ce projet fait l'objet d'un fil sur le forum 3R : https://forum.3rails.fr/t/cont
 - Bruit des moteurs avec le comparateur à 1 MΩ : à vérifier pendant une lecture.
 - Écriture des CV.
 - MS2 : demande « langver » (version du fichier de langue) sans réponse ; canaux de mesure (courant, tension, température) comme la Gleisbox.
-- Fonctions F16 et au-delà, réponses à Rocrail (surcharge).
+- Réponses à Rocrail (surcharge).
 - Circuit imprimé pour le capteur de retour.
 
 ### Matériel requis

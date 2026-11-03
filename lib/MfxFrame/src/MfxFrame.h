@@ -50,6 +50,10 @@ public:
     // 0111 + F15..F0 : functions F0 to F15, bit n of mask = Fn.
     void functions16(uint16_t mask);
 
+    // 100 NNNNNNN 0 F : one function, F0 to F127 (Krauss 3.1.6). The other
+    // functions keep their state: used for F16 and beyond.
+    void function(uint8_t number, bool on);
+
     // 111 011 + 14-bit SID + 32-bit UID : assignment of a rail address (Bind).
     // Sent to the broadcast address.
     void bind(uint16_t sid, uint32_t uid);

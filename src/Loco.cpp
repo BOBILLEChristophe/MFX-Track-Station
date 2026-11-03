@@ -32,6 +32,8 @@ Loco::Loco() : m_addr(0), m_dir(0), m_speed(0), m_name("")
 {
   memset(m_uid, 0, sizeof(m_uid));
   memset(m_funct, 0, sizeof(m_funct));
+  m_high = 0;
+  m_highNext = 0;
   memset(&m_mfx, 0, sizeof(m_mfx));
 }
 
@@ -43,6 +45,8 @@ Loco::Loco(uint16_t address, String name, uint8_t uid0, uint8_t uid1, uint8_t ui
       m_name(name)
 {
   memset(m_funct, 0, sizeof(m_funct));
+  m_high = 0;
+  m_highNext = 0;
   memset(&m_mfx, 0, sizeof(m_mfx));
 }
 
@@ -56,14 +60,33 @@ void Loco::speed(uint8_t speed) { m_speed = speed; }
 uint8_t Loco::speed() const { return m_speed; }
 void Loco::funct(uint32_t x, bool y)
 {
-  if (x < 32)
+  if (x < FUNCTIONS)
+  {
     m_funct[x] = y;
+    if (x >= 16)
+      m_high |= (uint16_t)(1u << (x - 16));
+  }
+}
+int8_t Loco::nextHighFunction()
+{
+  if (m_high == 0)
+    return -1;
+  for (uint8_t i = 0; i < 16; i++)
+  {
+    const uint8_t n = (uint8_t)((m_highNext + i) & 15);
+    if (m_high & (1u << n))
+    {
+      m_highNext = (uint8_t)((n + 1) & 15);
+      return (int8_t)(16 + n);
+    }
+  }
+  return -1;
 }
 uint8_t Loco::funct(uint32_t x) const { return x < 32 ? m_funct[x] : 0; }
 void Loco::toggleFunct(uint32_t x)
 {
-  if (x < 32)
-    m_funct[x] ^= 1;
+  if (x < FUNCTIONS)
+    funct(x, !m_funct[x]);
 }
 String Loco::name() const { return m_name; }
 

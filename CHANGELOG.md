@@ -1,5 +1,10 @@
 # Changelog
 
+## Unreleased
+
+### Added
+- **Functions F16 to F31** (Rocrail, MS2): sent one by one with the command `100 NNNNNNN 0 F` (Krauss 3.1.6, `MfxFrame::function()`), at once (twice) when switched, then repeated by the refresh: one of them per locomotive every 4 cycles (200 ms), in turn, only those switched at least once since start-up. F0 to F15 stay in the drive frame. New unit test.
+
 ## 0.13.0 — 2026-11-03
 
 ### Changed

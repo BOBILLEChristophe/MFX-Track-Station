@@ -93,7 +93,14 @@ public:
     static void parse();
     static void periodic(void *);
     static void driveFrame(Loco *l, byte *out, size_t outSize);
-    static void sendNow(Loco *l);
+    // fn >= 16: the function fn is sent alone (MfxFrame::function()),
+    // else the drive frame (speed, direction, F0 to F15)
+    static void sendNow(Loco *l, int fn = -1);
+    // One function of a locomotive (F16 and beyond), in the format of mfxQueue
+    static void functionFrame(Loco *l, uint8_t fn, byte *out, size_t outSize);
+    // The refresh repeats one of the functions F16 to F31 of a locomotive
+    // every HIGH_REFRESH_CYCLES cycles (50 ms each), in turn
+    static const uint8_t HIGH_REFRESH_CYCLES = 4;
     static void centrale(void *);
 
 

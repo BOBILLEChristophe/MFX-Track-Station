@@ -23,6 +23,8 @@ private:
   uint8_t m_dir;
   uint8_t m_speed;
   uint8_t m_funct[32];
+  uint16_t m_high;     // F16 to F31 switched at least once (bit n = F16 + n)
+  uint8_t m_highNext;  // next of them to repeat in the refresh
   String m_name;
   MfxInfo m_mfx;
 
@@ -42,6 +44,12 @@ public:
   void funct(uint32_t, bool);
   uint8_t funct(uint32_t) const;
   void toggleFunct(uint32_t);
+  // Number of functions handled (F0 to F31, as a CS2)
+  static const uint8_t FUNCTIONS = 32;
+  // F16 and beyond are sent one by one (MfxFrame::function()); the refresh
+  // repeats those switched at least once, in turn. Returns the next one,
+  // or -1 if none was switched.
+  int8_t nextHighFunction();
   String name() const;
   void name(const String &name);
   MfxInfo mfxInfo() const;

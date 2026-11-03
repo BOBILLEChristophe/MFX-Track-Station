@@ -108,12 +108,33 @@ void Message::driveFrame(Loco *l, byte *out, size_t outSize)
 }
 
 /*
+ One function, F16 and beyond (Krauss 3.1.6: 100 NNNNNNN 0 F). The drive
+ frame only carries F0 to F15.
+*/
+void Message::functionFrame(Loco *l, uint8_t fn, byte *out, size_t outSize)
+{
+    MfxFrame frame;
+    frame.address(l->addr());
+    frame.function(fn, l->funct(fn) != 0);
+    frame.finish();
+    frame.toBuffer(out, outSize);
+}
+
+/*
  A command from Rocrail is sent at once, at the head of the queue, instead
  of waiting for the next refresh (up to 50 ms). The refresh repeats it.
+ A function from F16 is sent twice: the refresh repeats it less often.
 */
-void Message::sendNow(Loco *l)
+void Message::sendNow(Loco *l, int fn)
 {
     byte frame[BUFF_MSG_SIZE];
+    if (fn >= 16 && fn < Loco::FUNCTIONS)
+    {
+        functionFrame(l, (uint8_t)fn, frame, sizeof(frame));
+        xQueueSendToFront(mfxQueue, frame, 0);
+        xQueueSendToFront(mfxQueue, frame, 0);
+        return;
+    }
     driveFrame(l, frame, sizeof(frame));
     xQueueSendToFront(mfxQueue, frame, 0);
 }
@@ -129,8 +150,11 @@ void Message::periodic(void *p)
 
     // byte buff[BUFF_MSG_SIZE] = {0};
 
+    uint32_t cycle = 0;
     for (;;)
     {
+        // F16 and beyond: one of them per locomotive, every few cycles
+        const bool high = (cycle++ % HIGH_REFRESH_CYCLES) == 0;
         for (byte i = 0; i < locoSize; i++)
         {
             if (xSemaphoreTake(taskSemaphore, portMAX_DELAY) == pdTRUE)
@@ -143,6 +167,13 @@ void Message::periodic(void *p)
                     driveFrame(loco[i], buff, sizeof(buff));
 
                     xQueueSend(mfxQueue, &buff, 0);
+
+                    const int8_t fn = high ? loco[i]->nextHighFunction() : -1;
+                    if (fn >= 0)
+                    {
+                        functionFrame(loco[i], (uint8_t)fn, buff, sizeof(buff));
+                        xQueueSend(mfxQueue, &buff, 0);
+                    }
                 }
                 vTaskDelay(pdMS_TO_TICKS(5));
             }
@@ -417,7 +448,7 @@ void Message::parse()
                        (cmd == CAN_LOCO_DIREC && length >= 5) ||
                        (cmd == CAN_LOCO_FUNCT && length >= 6);
     if (order)
-        sendNow(currentLoco);
+        sendNow(currentLoco, cmd == CAN_LOCO_FUNCT ? data[4] : -1);
     locoAnswer(currentLoco);
 
     if (traceCommands)
