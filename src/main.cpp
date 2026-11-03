@@ -32,6 +32,7 @@
 #include "RxTask.h"
 #include "CanBus.h"
 #include "MfxRMT.h"
+#include "BuildInfo.h"
 
 // Central system ID used for identification
 const uint32_t idCentrale = 0x476bb7dc;
@@ -191,8 +192,7 @@ void setup()
   Serial.printf("\nVersion   :    %s", VERSION);
   Serial.printf("\nAuteur    :    %s", AUTHOR);
   Serial.printf("\nFichier   :    %s", __FILE__);
-  Serial.printf("\nCompiled  :    %s", __DATE__);
-  Serial.printf(" - %s\n\n", __TIME__);
+  Serial.printf("\nCompiled  :    %s\n\n", BUILD_DATE);
 
   // Create MFX message queue (10 * 'BUFFER_SIZE'(100) octets)
   mfxQueue = xQueueCreate(10, BUFFER_SIZE);
