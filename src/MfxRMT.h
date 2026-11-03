@@ -24,6 +24,11 @@ class RMTChannel
 public:
     RMTChannel() = delete;
     static void setup(gpio_num_t IN1, gpio_num_t IN2);
+    // Test (serial command H): after each frame of the refresh, a
+    // synchronisation and a hold of the track of END_HOLD_US, as the
+    // Gleisbox does (with an MS2: a pause of 1 to 2 ms after nearly every
+    // frame, 1667 in 30 s; our station sent syncs without a break)
+    static volatile bool framePause;
 
 private:
     static void signalTask(void *parameter);

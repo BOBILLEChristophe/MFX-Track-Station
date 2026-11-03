@@ -108,6 +108,8 @@ int64_t RMTChannel::send(const MfxSignal &signal)
     return start;
 }
 
+volatile bool RMTChannel::framePause = false;
+
 void RMTChannel::signalTask(void *parameter)
 {
     Serial.printf("Signal task running on core %d\n", xPortGetCoreID());
@@ -157,6 +159,11 @@ void RMTChannel::signalTask(void *parameter)
                 // 100 µs half-bit merges with the hold. Holding right after
                 // the first one swallowed its last edge: the bind was never
                 // ended for the decoders (nor for the sniffer)
+                signal.sync();
+                signal.hold(MfxSignal::END_HOLD_US);
+            }
+            else if (framePause)
+            {
                 signal.sync();
                 signal.hold(MfxSignal::END_HOLD_US);
             }
