@@ -701,6 +701,53 @@ static void benchAsk(const MfxFrame &f, const char *what, uint16_t n, uint32_t p
         free(col[k]);
 }
 
+/*
+ Test scenario (serial command X): verifies of one locomotive, the periodic
+ refresh of the locomotives on and off in turn, rounds x per questions for
+ each case. Alternating keeps a slow drift (heating, position on the track)
+ from favouring one case. One line per block, a summary at the end; the
+ refresh is left as it was.
+*/
+static void scenarioRefresh(uint16_t a, uint16_t rounds, uint16_t per)
+{
+    Loco *l = Loco::findLoco(a);
+    MfxFrame f;
+    f.address(a);
+    f.verify(l->uid32());
+    f.finish();
+    const bool wasQuiet = Message::quiet;
+    uint32_t got[2] = {0, 0}, asked[2] = {0, 0};
+    uint16_t worst[2] = {0xFFFF, 0xFFFF};
+    const uint32_t t0 = millis();
+    Serial.printf("\nScenario: %s (address %u), %u rounds of %u verifies with the refresh on, then off\n",
+                  l->name().c_str(), a, rounds, per);
+    for (uint16_t r = 1; r <= rounds && Centrale::power(); r++)
+        for (uint8_t q = 0; q < 2; q++)
+        {
+            Message::quiet = (q == 1);
+            vTaskDelay(pdMS_TO_TICKS(300)); // the queue empties
+            uint16_t ok = 0;
+            for (uint16_t i = 0; i < per; i++)
+            {
+                if (Feedback::ask(f))
+                    ok++;
+                vTaskDelay(pdMS_TO_TICKS(ANSWER_PAUSE_MS));
+            }
+            got[q] += ok;
+            asked[q] += per;
+            if (ok < worst[q])
+                worst[q] = ok;
+            Serial.printf("Scenario: round %2u, refresh %s: %2u/%u\n", r, q ? "off" : "on ", ok, per);
+        }
+    Message::quiet = wasQuiet;
+    Serial.printf("Scenario: summary, %.0f s\n", (millis() - t0) / 1000.0f);
+    for (uint8_t q = 0; q < 2; q++)
+        if (asked[q])
+            Serial.printf("  refresh %s: %lu/%lu answers (%.1f %% silent), worst round %u/%u\n", q ? "off" : "on ",
+                          (unsigned long)got[q], (unsigned long)asked[q],
+                          100.0f * (asked[q] - got[q]) / asked[q], worst[q], per);
+}
+
 static void benchVerify(uint16_t a, uint16_t n)
 {
     Loco *l = Loco::findLoco(a);
@@ -911,6 +958,33 @@ static void console()
             else
                 benchRead(a, n ? n : 10);
         }
+        else if (c == 'X')
+        {
+            // Test scenario: X<address>[,rounds[,per round]], X2575 = 10 rounds
+            // of 20 verifies with the refresh on, 20 with it off
+            vTaskDelay(pdMS_TO_TICKS(50));
+            uint16_t a = 0, r = 0, n = 0;
+            while (Serial.available() > 0 && isdigit(Serial.peek()))
+                a = a * 10 + (Serial.read() - '0');
+            if (Serial.available() > 0 && Serial.peek() == ',')
+            {
+                Serial.read();
+                while (Serial.available() > 0 && isdigit(Serial.peek()))
+                    r = r * 10 + (Serial.read() - '0');
+            }
+            if (Serial.available() > 0 && Serial.peek() == ',')
+            {
+                Serial.read();
+                while (Serial.available() > 0 && isdigit(Serial.peek()))
+                    n = n * 10 + (Serial.read() - '0');
+            }
+            if (Loco::findLoco(a) == nullptr)
+                Serial.println("\nX: X<address of a known locomotive>[,rounds[,verifies per round]], X2575 or X2575,10,20");
+            else if (!Centrale::power())
+                Serial.println("\nX: the track is off");
+            else
+                scenarioRefresh(a, r ? r : 10, n ? n : 20);
+        }
         else if (c == 'Q')
         {
             Message::quiet = !Message::quiet;
@@ -1051,7 +1125,7 @@ static void console()
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
                           "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "
                           "T<UID>[,1] = test bench, search questions for every count (,1: other bits at 1), "
-                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I10 default), B<addr>,<new> = move a locomotive to another address (test), Q = stop/restart the refresh of the locomotives (test), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I10 default), B<addr>,<new> = move a locomotive to another address (test), Q = stop/restart the refresh of the locomotives (test), X<addr>[,rounds,per] = scenario: verifies with the refresh on and off in turn, E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }
