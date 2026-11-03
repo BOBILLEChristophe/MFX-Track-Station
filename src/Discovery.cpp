@@ -15,6 +15,7 @@
 #include "LocoStore.h"
 #include "MfxSignal.h"
 #include <unordered_map>
+#include <Preferences.h>
 
 // Addresses of the known locomotives, sorted (at most max)
 static uint8_t knownAddresses(uint16_t *out, uint8_t max)
@@ -426,6 +427,164 @@ static std::unordered_map<uint16_t, Presence> sPresence; // by address
  search again and is registered as a new locomotive (address, configuration,
  name), exactly as on an MS2.
 */
+/*
+ Decoders to make forget their address. A decoder keeps its address while
+ it hears this command station (UID and counter), and then no longer
+ answers the search: if the command station forgets it but the decoder did
+ not hear the order to forget (track off, locomotive off the track), it
+ stays invisible for good (241 A, 2-3 Nov 2026). So each deletion is kept
+ here (NVS, namespace "locos", key "forget"): every FORGET_CHECK_MS the
+ command station asks each address whether its decoder is still there with
+ that UID, and if so sends the order to forget again. The entry goes when
+ the decoder is found by the search (it forgot) or bound again by the
+ master. An entry without a UID (D on an unknown address, track off) is
+ sent once, as soon as the track is on.
+*/
+struct ForgetEntry
+{
+    uint32_t uid; // 0: unknown, sent once
+    uint16_t addr;
+};
+static const uint8_t MAX_FORGET = 16;
+static const uint32_t FORGET_CHECK_MS = 30000;
+static ForgetEntry sForget[MAX_FORGET];
+static uint8_t sForgetCount = 0;
+static bool sForgetLoaded = false;
+
+static void forgetSave()
+{
+    Preferences prefs;
+    if (!prefs.begin("locos", false))
+        return;
+    if (sForgetCount)
+        prefs.putBytes("forget", sForget, sForgetCount * sizeof(ForgetEntry));
+    else if (prefs.isKey("forget"))
+        prefs.remove("forget");
+    prefs.end();
+}
+
+static void forgetLoad()
+{
+    if (sForgetLoaded)
+        return;
+    sForgetLoaded = true;
+    Preferences prefs;
+    if (!prefs.begin("locos", false))
+        return;
+    if (prefs.isKey("forget"))
+    {
+        const size_t len = prefs.getBytesLength("forget");
+        if (len % sizeof(ForgetEntry) == 0 && len <= sizeof(sForget))
+        {
+            prefs.getBytes("forget", sForget, len);
+            sForgetCount = len / sizeof(ForgetEntry);
+        }
+    }
+    prefs.end();
+    if (sForgetCount)
+        Serial.printf("Discovery: %u deleted decoder(s) to check (they may still have their address)\n",
+                      sForgetCount);
+}
+
+static void forgetRemoveAt(uint8_t i)
+{
+    for (uint8_t j = i + 1; j < sForgetCount; j++)
+        sForget[j - 1] = sForget[j];
+    sForgetCount--;
+}
+
+// The decoder of this UID forgot its address (found by the search) or got
+// a new one from the master: nothing more to do for it
+static void forgetDrop(uint32_t uid)
+{
+    forgetLoad();
+    bool changed = false;
+    for (uint8_t i = 0; i < sForgetCount;)
+        if (uid != 0 && sForget[i].uid == uid)
+        {
+            forgetRemoveAt(i);
+            changed = true;
+        }
+        else
+            i++;
+    if (changed)
+        forgetSave();
+}
+
+static void forgetAdd(uint32_t uid, uint16_t addr)
+{
+    forgetLoad();
+    for (uint8_t i = 0; i < sForgetCount;)
+        if ((uid != 0 && sForget[i].uid == uid) || sForget[i].addr == addr)
+            forgetRemoveAt(i);
+        else
+            i++;
+    if (sForgetCount == MAX_FORGET)
+        forgetRemoveAt(0); // the oldest
+    sForget[sForgetCount++] = {uid, addr};
+    forgetSave();
+}
+
+// Verify with the UID 0: the decoder with this address forgets it
+static void sendForget(uint16_t a)
+{
+    for (uint8_t i = 0; i < 2; i++)
+    {
+        MfxFrame f;
+        f.address(a);
+        f.verify(0);
+        f.finish();
+        Feedback::ask(f);
+        vTaskDelay(pdMS_TO_TICKS(50));
+    }
+}
+
+static void forgetCheck()
+{
+    static uint32_t last = 0;
+    forgetLoad();
+    if (sForgetCount == 0 || !Centrale::power() || Centrale::poweredForMs() < POWERED_MS)
+        return;
+    if (last != 0 && millis() - last < FORGET_CHECK_MS)
+        return;
+    last = millis();
+    bool changed = false;
+    for (uint8_t i = 0; i < sForgetCount;)
+    {
+        const ForgetEntry e = sForget[i];
+        if (e.uid == 0)
+        {
+            sendForget(e.addr);
+            Serial.printf("Discovery: address %u sent to the decoders (UID 0), the track being on now\n", e.addr);
+            forgetRemoveAt(i);
+            changed = true;
+            continue;
+        }
+        if (Loco *l = Loco::findLoco(e.addr))
+            if (l->uid32() == e.uid)
+            {
+                // Registered here again at the same address: nothing to do
+                forgetRemoveAt(i);
+                changed = true;
+                continue;
+            }
+        MfxFrame f;
+        f.address(e.addr);
+        f.verify(e.uid);
+        f.finish();
+        Feedback::Result r = {};
+        if (Feedback::ask(f, &r))
+        {
+            sendForget(e.addr);
+            Serial.printf("Discovery: deleted decoder %08lX still had the address %u: told again to forget it\n",
+                          (unsigned long)e.uid, e.addr);
+        }
+        i++;
+    }
+    if (changed)
+        forgetSave();
+}
+
 static void deleteLoco(uint16_t a)
 {
     Loco *l = Loco::findLoco(a);
@@ -435,18 +594,11 @@ static void deleteLoco(uint16_t a)
         // while the track was off): its decoder may still have the address
         if (!Centrale::power())
         {
-            Serial.printf("\nDelete: address %u unknown, and the track is off: nothing done\n", a);
+            forgetAdd(0, a);
+            Serial.printf("\nDelete: address %u unknown, and the track is off: sent as soon as the track is on\n", a);
             return;
         }
-        for (uint8_t i = 0; i < 2; i++)
-        {
-            MfxFrame f;
-            f.address(a);
-            f.verify(0);
-            f.finish();
-            Feedback::ask(f);
-            vTaskDelay(pdMS_TO_TICKS(50));
-        }
+        sendForget(a);
         Serial.printf("\nDelete: address %u sent to the decoders (UID 0): a decoder with this address registers again\n",
                       a);
         return;
@@ -454,15 +606,8 @@ static void deleteLoco(uint16_t a)
     const String name = l->name();
     const uint32_t uid = l->uid32();
     if (Centrale::power())
-        for (uint8_t i = 0; i < 2; i++)
-        {
-            MfxFrame f;
-            f.address(a);
-            f.verify(0);
-            f.finish();
-            Feedback::ask(f);
-            vTaskDelay(pdMS_TO_TICKS(50));
-        }
+        sendForget(a);
+    forgetAdd(uid, a); // checked again later: the decoder may not have heard it
     Message::removeLoco(a);
     Loco::removeLoco(a);
     sPresence.erase(a);
@@ -470,7 +615,7 @@ static void deleteLoco(uint16_t a)
     LocoStore::save();
     Serial.printf("\nDeleted: %s (UID %08lX) at address %u%s. Delete it in Rocrail too.\n", name.c_str(),
                   (unsigned long)uid, a,
-                  Centrale::power() ? "" : " (track off: its decoder keeps the address until the counter changes)");
+                  Centrale::power() ? "" : " (track off: its decoder is told to forget it once the track is on)");
 }
 
 /*
@@ -1146,6 +1291,7 @@ void Discovery::masterOrders()
             Serial.printf("Discovery: bind of %08lX at address %u by the master, done\n", (unsigned long)o.uid,
                           o.sid);
             sPending = {true, false, o.uid, o.sid, millis()};
+            forgetDrop(o.uid);
             continue;
         }
         // verify
@@ -1158,13 +1304,19 @@ void Discovery::masterOrders()
         if (o.uid == 0)
         {
             // Deletion by the master: the decoder at sid forgets its address
-            Feedback::ask(f);
-            if (Loco::findLoco(o.sid) != nullptr)
+            if (Centrale::power())
+                sendForget(o.sid);
+            if (Loco *l = Loco::findLoco(o.sid))
             {
+                forgetAdd(l->uid32(), o.sid); // checked again later
                 Message::removeLoco(o.sid);
                 Loco::removeLoco(o.sid);
+                sPresence.erase(o.sid);
+                sReadTries.erase(o.sid);
                 LocoStore::save();
             }
+            else if (!Centrale::power())
+                forgetAdd(0, o.sid);
             const uint8_t none[6] = {0, 0, 0, 0, 0, 0};
             Message::answer(CAN_MFX_VERIFY, 6, none);
             Serial.printf("Discovery: address %u deleted by the master\n", o.sid);
@@ -1271,12 +1423,14 @@ void Discovery::task(void *)
                     const bool sent = Message::answer(CAN_LOCO_DISCOVERY, sizeof(d), d);
                     Serial.printf("Discovery: decoder %08lX found, reported to the master%s\n",
                                   (unsigned long)uid, sent ? "" : " (NOT connected)");
+                    forgetDrop(uid);
                 }
                 last = uid;
                 lastTime = xTaskGetTickCount();
             }
             if (Centrale::power())
                 verifyNext();
+            forgetCheck();
         }
         vTaskDelay(pdMS_TO_TICKS(PERIOD_MS));
     }
