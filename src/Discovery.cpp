@@ -911,6 +911,12 @@ static void console()
             else
                 benchRead(a, n ? n : 10);
         }
+        else if (c == 'Q')
+        {
+            Message::quiet = !Message::quiet;
+            Serial.printf("\nPeriodic refresh of the locomotives: %s\n",
+                          Message::quiet ? "STOPPED (test, Q to restart)" : "running");
+        }
         else if (c == 'B')
         {
             // Test: B<address>,<new address> = the locomotive gets another
@@ -1045,7 +1051,7 @@ static void console()
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
                           "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "
                           "T<UID>[,1] = test bench, search questions for every count (,1: other bits at 1), "
-                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I10 default), B<addr>,<new> = move a locomotive to another address (test), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I10 default), B<addr>,<new> = move a locomotive to another address (test), Q = stop/restart the refresh of the locomotives (test), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }
