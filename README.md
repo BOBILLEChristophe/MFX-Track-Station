@@ -62,7 +62,7 @@ Le capteur (schéma ci-dessous) :
 - **T1** : tore en poudre de fer Micrometals T50-26B. Le fil de voie OUT1 le traverse une fois (un seul des deux fils). Secondaire : 52 spires de fil émaillé soudable 0,20 mm (L ≈ 118 µH).
 - **Circuit accordé** sur environ 53 kHz, la porteuse de la réponse des décodeurs : 68 nF + 6,8 nF (polypropylène) et 150 Ω en parallèle sur le secondaire. Son point bas est à VREF = 1,65 V (pont 10 kΩ / 10 kΩ découplé par 1 µF).
 - **Comparateur** MCP6541 (DIP-8, 3,3 V) avec une hystérésis d'environ ±16 mV (10 kΩ et **1 MΩ**). Sa sortie va sur **GPIO 26** (`FEEDBACK_PIN` dans `src/main.cpp`).
-  *Attention : le schéma ci-dessous montre encore 330 kΩ (±50 mV), la première valeur. Avec 330 kΩ, une réponse faible est perdue dès qu'une deuxième loco est sur la voie (probablement parce que ses condensateurs d'entrée fournissent une partie du courant de la réponse, qui ne passe plus par le tore) : la 241 A ne se lisait plus en présence de la 150 Y. Avec 1 MΩ (essayé avec 3 × 330 kΩ en série), elle se lit sans erreur, et le bruit reste nul quand aucun décodeur ne répond.*
+  *Première valeur : 330 kΩ (±50 mV). Avec 330 kΩ, une réponse faible est perdue dès qu'une deuxième loco est sur la voie (probablement parce que ses condensateurs d'entrée fournissent une partie du courant de la réponse, qui ne passe plus par le tore) : la 241 A ne se lisait plus en présence de la 150 Y. Avec 1 MΩ (essayé avec 3 × 330 kΩ en série), elle se lit sans erreur, et le bruit reste nul quand aucun décodeur ne répond.*
 
 Le +3,3 V et la masse sont ceux de l'ESP32 ; le tore isole le capteur de la voie.
 

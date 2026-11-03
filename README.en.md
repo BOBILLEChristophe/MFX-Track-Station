@@ -62,7 +62,7 @@ The sensor (schematic below):
 - **T1**: Micrometals T50-26B iron powder toroid. The track wire OUT1 goes through it once (only one of the two wires). Secondary: 52 turns of 0.20 mm solderable enamelled wire (L ≈ 118 µH).
 - **Tuned circuit** at about 53 kHz, the carrier of the answer of the decoders: 68 nF + 6.8 nF (polypropylene) and 150 Ω in parallel with the secondary. Its low end is at VREF = 1.65 V (10 kΩ / 10 kΩ divider decoupled by 1 µF).
 - **Comparator** MCP6541 (DIP-8, 3.3 V) with a hysteresis of about ±16 mV (10 kΩ and **1 MΩ**). Its output goes to **GPIO 26** (`FEEDBACK_PIN` in `src/main.cpp`).
-  *Note: the schematic below still shows 330 kΩ (±50 mV), the first value. With 330 kΩ, a weak answer is lost as soon as a second loco is on the track (probably because its input capacitors supply part of the current of the answer, which no longer goes through the toroid): the 241 A could no longer be read with the 150 Y on the track. With 1 MΩ (tried with 3 × 330 kΩ in series), it is read without error, and the noise stays at zero when no decoder answers.*
+  *First value: 330 kΩ (±50 mV). With 330 kΩ, a weak answer is lost as soon as a second loco is on the track (probably because its input capacitors supply part of the current of the answer, which no longer goes through the toroid): the 241 A could no longer be read with the 150 Y on the track. With 1 MΩ (tried with 3 × 330 kΩ in series), it is read without error, and the noise stays at zero when no decoder answers.*
 
 The +3.3 V and the ground are those of the ESP32; the toroid isolates the sensor from the track.
 
