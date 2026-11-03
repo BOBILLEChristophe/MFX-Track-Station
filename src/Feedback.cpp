@@ -33,6 +33,8 @@
 
 bool Feedback::sReady = false;
 bool Feedback::sTrace = false;
+uint32_t Feedback::readTries = 0;
+uint32_t Feedback::readRetried = 0;
 bool Feedback::sTraceSearch = false;
 
 static const pcnt_unit_t UNIT = PCNT_UNIT_0;
@@ -448,6 +450,9 @@ bool Feedback::readCV(uint16_t sid, uint16_t cv, uint8_t index, uint8_t bytes, u
             vTaskDelay(pdMS_TO_TICKS(READ_PAUSE_MS) - since);
         ok = readOnce(frame, bytes, out);
         lastRead = xTaskGetTickCount();
+        readTries++;
+        if (i == 1)
+            readRetried++; // a second try: the first one stayed silent
     }
     xSemaphoreGive(sMutex);
 

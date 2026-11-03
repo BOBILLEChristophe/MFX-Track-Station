@@ -24,6 +24,13 @@ class RMTChannel
 public:
     RMTChannel() = delete;
     static void setup(gpio_num_t IN1, gpio_num_t IN2);
+    // After each frame of the refresh, a synchronisation and a hold of the
+    // track of END_HOLD_US, as the Gleisbox does (with an MS2: a pause of
+    // 1 to 2 ms after nearly every frame, 1667 in 30 s). Without it, the
+    // Marklin decoders of the 150 Y 17 and the 241 A missed 10 to 15 % of
+    // the questions (search, verify); with it, none out of 400 (scenario Y,
+    // 3 Nov 2026). Serial command H switches it off and on (test).
+    static volatile bool framePause;
 
 private:
     static void signalTask(void *parameter);

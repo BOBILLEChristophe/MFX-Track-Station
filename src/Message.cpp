@@ -118,6 +118,8 @@ void Message::sendNow(Loco *l)
     xQueueSendToFront(mfxQueue, frame, 0);
 }
 
+volatile bool Message::quiet = false;
+
 void Message::periodic(void *p)
 {
     Loco **loco;
@@ -133,7 +135,7 @@ void Message::periodic(void *p)
         {
             if (xSemaphoreTake(taskSemaphore, portMAX_DELAY) == pdTRUE)
             {
-                if (loco[i] != nullptr)
+                if (loco[i] != nullptr && !quiet)
                 {
                     if (trace)
                         Serial.printf("Periodic- %s\n", loco[i]->name().c_str());

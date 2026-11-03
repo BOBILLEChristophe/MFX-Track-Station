@@ -53,9 +53,12 @@ public:
     // (0x4000 + SID for mfx)
     static void requestRead(uint32_t locId, uint16_t cv, uint8_t index, uint8_t count);
 
+    // Does the orders of the master waiting (also called by the test
+    // scenarios before they start)
+    static void masterOrders();
+
 private:
     static void task(void *);
     static bool probe(uint8_t count, uint32_t uid);
-    static void masterOrders();
     static bool readDeclaredConfigs();
 };

@@ -61,6 +61,10 @@ private:
     static byte locoCapacity;      // size of loco[]
 
 public:
+    // Test (serial command Q): the periodic refresh of the locomotives is
+    // stopped, only the frame of the command station and the requests go
+    // to the track
+    static volatile bool quiet;
     // locoArray: room for capacity locomotives, the first count are filled
     static void setup(Loco *locoArray[], byte capacity, byte count);
     // Adds a locomotive to the refresh (drive frames and Bind).

@@ -14,6 +14,7 @@
 #include "Cs2Config.h"
 #include "LocoStore.h"
 #include "MfxSignal.h"
+#include "MfxRMT.h"
 #include <unordered_map>
 #include <Preferences.h>
 
@@ -170,6 +171,7 @@ bool Discovery::readConfig(uint16_t sid, char *nameOut, size_t size)
 {
     static MfxConfig c; // static: keeps the task stack small (one task only)
     const uint32_t t0 = millis();
+    const uint32_t tries0 = Feedback::readTries, retried0 = Feedback::readRetried;
     sMoving = false;
     // Nothing else is printed until the end: about one second per CV
     // block, a few minutes for a decoder with many functions
@@ -257,7 +259,9 @@ bool Discovery::readConfig(uint16_t sid, char *nameOut, size_t size)
     if (const MfxConfig::Block *f = c.block(0x04))
         Serial.printf("  block 04: %u groups of %u CAs, %u functions read\n", f->groups, f->perGroup,
                       c.functionCount);
-    Serial.printf("  %u reads, %u failed, %.1f s", c.reads, c.failures, (millis() - t0) / 1000.0f);
+    Serial.printf("  %u reads, %u failed, %.1f s; on the track %lu tries, %lu reads needed more than one",
+                  c.reads, c.failures, (millis() - t0) / 1000.0f, (unsigned long)(Feedback::readTries - tries0),
+                  (unsigned long)(Feedback::readRetried - retried0));
     for (uint8_t i = 0; i < c.failures && i < MfxConfig::MAX_FAILED; i++)
         Serial.printf("%s %03X/%02X", i ? "," : " (failed:", c.failedCv[i], c.failedIndex[i]);
     Serial.println(c.failures ? ")" : "");
@@ -585,6 +589,8 @@ static void forgetCheck()
         forgetSave();
 }
 
+static Loco *locoAt(uint32_t uid, uint16_t sid);
+
 static void deleteLoco(uint16_t a)
 {
     Loco *l = Loco::findLoco(a);
@@ -694,6 +700,81 @@ static void benchAsk(const MfxFrame &f, const char *what, uint16_t n, uint32_t p
     }
     for (uint8_t k = 0; k < 6; k++)
         free(col[k]);
+}
+
+/*
+ Test scenario (serial command X): verifies of one locomotive, the periodic
+ refresh of the locomotives on and off in turn, rounds x per questions for
+ each case. Alternating keeps a slow drift (heating, position on the track)
+ from favouring one case. One line per block, a summary at the end; the
+ refresh is left as it was.
+*/
+static void scenarioRefresh(uint16_t a, uint16_t rounds, uint16_t per, bool pauseTest = false)
+{
+    Loco *l = Loco::findLoco(a);
+    MfxFrame f;
+    f.address(a);
+    f.verify(l->uid32());
+    f.finish();
+    // Orders of the master waiting (a bind of a locomotive just found): done
+    // first, or the decoder would stay without its address for the whole
+    // scenario (3 Nov: the 040 found, bound by Rocrail, then 0/400)
+    Discovery::masterOrders();
+    // The locomotive must answer before 80 s of questions: a few verifies,
+    // stop at the first answer
+    bool here = false;
+    for (uint8_t i = 0; i < 5 && !here; i++)
+    {
+        here = Feedback::ask(f);
+        if (!here)
+            vTaskDelay(pdMS_TO_TICKS(MISS_PAUSE_MS));
+    }
+    if (!here)
+    {
+        Serial.printf("\nScenario: %s (address %u) does not answer 5 verifies, scenario not started.\n"
+                      "  Is it on the track? If it was deleted from Rocrail (or from the station), its decoder\n"
+                      "  has no address any more: leave it on the track, wait for the line\n"
+                      "  \"Discovery: bind of ... by the master, done\" (Rocrail registers it), then start again.\n",
+                      l->name().c_str(), a);
+        return;
+    }
+    const bool wasQuiet = Message::quiet, wasPause = RMTChannel::framePause;
+    static const char *const NAMES[2][2] = {{"refresh on ", "refresh off"}, {"no pause   ", "pause      "}};
+    uint32_t got[2] = {0, 0}, asked[2] = {0, 0};
+    uint16_t worst[2] = {0xFFFF, 0xFFFF};
+    const uint32_t t0 = millis();
+    Serial.printf("\nScenario: %s (address %u), %u rounds of %u verifies %s\n", l->name().c_str(), a, rounds,
+                  per, pauseTest ? "without, then with the pause after the frames"
+                                 : "with the refresh on, then off");
+    for (uint16_t r = 1; r <= rounds && Centrale::power(); r++)
+        for (uint8_t q = 0; q < 2; q++)
+        {
+            if (pauseTest)
+                RMTChannel::framePause = (q == 1);
+            else
+                Message::quiet = (q == 1);
+            vTaskDelay(pdMS_TO_TICKS(300)); // the queue empties
+            uint16_t ok = 0;
+            for (uint16_t i = 0; i < per; i++)
+            {
+                if (Feedback::ask(f))
+                    ok++;
+                vTaskDelay(pdMS_TO_TICKS(ANSWER_PAUSE_MS));
+            }
+            got[q] += ok;
+            asked[q] += per;
+            if (ok < worst[q])
+                worst[q] = ok;
+            Serial.printf("Scenario: round %2u, %s: %2u/%u\n", r, NAMES[pauseTest][q], ok, per);
+        }
+    Message::quiet = wasQuiet;
+    RMTChannel::framePause = wasPause;
+    Serial.printf("Scenario: summary, %.0f s\n", (millis() - t0) / 1000.0f);
+    for (uint8_t q = 0; q < 2; q++)
+        if (asked[q])
+            Serial.printf("  %s: %lu/%lu answers (%.1f %% silent), worst round %u/%u\n", NAMES[pauseTest][q],
+                          (unsigned long)got[q], (unsigned long)asked[q],
+                          100.0f * (asked[q] - got[q]) / asked[q], worst[q], per);
 }
 
 static void benchVerify(uint16_t a, uint16_t n)
@@ -906,6 +987,78 @@ static void console()
             else
                 benchRead(a, n ? n : 10);
         }
+        else if (c == 'X' || c == 'Y')
+        {
+            // Test scenario: X<address>[,rounds[,per round]], X2575 = 10 rounds
+            // of 20 verifies with the refresh on, 20 with it off
+            vTaskDelay(pdMS_TO_TICKS(50));
+            uint16_t a = 0, r = 0, n = 0;
+            while (Serial.available() > 0 && isdigit(Serial.peek()))
+                a = a * 10 + (Serial.read() - '0');
+            if (Serial.available() > 0 && Serial.peek() == ',')
+            {
+                Serial.read();
+                while (Serial.available() > 0 && isdigit(Serial.peek()))
+                    r = r * 10 + (Serial.read() - '0');
+            }
+            if (Serial.available() > 0 && Serial.peek() == ',')
+            {
+                Serial.read();
+                while (Serial.available() > 0 && isdigit(Serial.peek()))
+                    n = n * 10 + (Serial.read() - '0');
+            }
+            if (Loco::findLoco(a) == nullptr)
+                Serial.printf("\n%c: %c<address of a known locomotive>[,rounds[,verifies per round]], %c2575 or %c2575,10,20\n",
+                              c, c, c, c);
+            else if (!Centrale::power())
+                Serial.printf("\n%c: the track is off\n", c);
+            else
+                scenarioRefresh(a, r ? r : 10, n ? n : 20, c == 'Y');
+        }
+        else if (c == 'H')
+        {
+            RMTChannel::framePause = !RMTChannel::framePause;
+            Serial.printf("\nPause of %u us after each frame (as the Gleisbox, default): %s\n", MfxSignal::END_HOLD_US,
+                          RMTChannel::framePause ? "on" : "off");
+        }
+        else if (c == 'Q')
+        {
+            Message::quiet = !Message::quiet;
+            Serial.printf("\nPeriodic refresh of the locomotives: %s\n",
+                          Message::quiet ? "STOPPED (test, Q to restart)" : "running");
+        }
+        else if (c == 'B')
+        {
+            // Test: B<address>,<new address> = the locomotive gets another
+            // address (bind sent to its decoder), to compare the answers
+            // with a short address (7 bits, below 128) and a long one.
+            // The master is not told: drive it again at its old address
+            // only after B<new>,<old>.
+            vTaskDelay(pdMS_TO_TICKS(50));
+            uint16_t a = 0, n = 0;
+            while (Serial.available() > 0 && isdigit(Serial.peek()))
+                a = a * 10 + (Serial.read() - '0');
+            if (Serial.available() > 0 && Serial.peek() == ',')
+            {
+                Serial.read();
+                while (Serial.available() > 0 && isdigit(Serial.peek()))
+                    n = n * 10 + (Serial.read() - '0');
+            }
+            Loco *l = Loco::findLoco(a);
+            if (l == nullptr || n == 0 || n > 16383 || Loco::findLoco(n) != nullptr)
+                Serial.println("\nB: B<address of a known locomotive>,<free new address 1..16383>, B2575,10 for example");
+            else if (!Centrale::power())
+                Serial.println("\nB: the track is off");
+            else
+            {
+                const uint32_t uid = l->uid32();
+                Loco *m = locoAt(uid, n);
+                sendBind(m);
+                LocoStore::save();
+                Serial.printf("\nTest: %08lX moved from address %u to %u (Rocrail is not told; B%u,%u to go back)\n",
+                              (unsigned long)uid, a, n, n, a);
+            }
+        }
         else if (c == 'S' || c == 'T')
         {
             // S<UID in hex>[,count]: search questions with the whole UID (50).
@@ -1008,7 +1161,7 @@ static void console()
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
                           "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "
                           "T<UID>[,1] = test bench, search questions for every count (,1: other bits at 1), "
-                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I10 default), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I10 default), B<addr>,<new> = move a locomotive to another address (test), Q = stop/restart the refresh of the locomotives (test), X<addr>[,rounds,per] = scenario: verifies with the refresh on and off in turn, Y<addr>[,rounds,per] = the same without and with the pause after the frames, H = pause after the frames (on/off), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }
@@ -1198,6 +1351,7 @@ static void readForMaster(const MasterOrder &o)
     const bool isName = (o.cv == 3 && o.index == 1 && o.count >= 2 && o.count <= 16);
     char name[17];
     memset(name, 0, sizeof(name));
+    const uint32_t tries0 = Feedback::readTries;
     uint8_t done = 0;
     while (done < o.count)
     {
@@ -1235,8 +1389,8 @@ static void readForMaster(const MasterOrder &o)
             LocoStore::save();
         }
     }
-    Serial.printf("Discovery: CV %u index %u..%u at address %u read for the master\n", o.cv, o.index,
-                  o.index + o.count - 1, o.sid);
+    Serial.printf("Discovery: CV %u index %u..%u at address %u read for the master (%lu tries on the track)\n",
+                  o.cv, o.index, o.index + o.count - 1, o.sid, (unsigned long)(Feedback::readTries - tries0));
 }
 
 // The locomotive with this UID, at address sid (created or moved there)
