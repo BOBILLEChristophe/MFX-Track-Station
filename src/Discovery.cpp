@@ -588,6 +588,8 @@ static void forgetCheck()
         forgetSave();
 }
 
+static Loco *locoAt(uint32_t uid, uint16_t sid);
+
 static void deleteLoco(uint16_t a)
 {
     Loco *l = Loco::findLoco(a);
@@ -909,6 +911,38 @@ static void console()
             else
                 benchRead(a, n ? n : 10);
         }
+        else if (c == 'B')
+        {
+            // Test: B<address>,<new address> = the locomotive gets another
+            // address (bind sent to its decoder), to compare the answers
+            // with a short address (7 bits, below 128) and a long one.
+            // The master is not told: drive it again at its old address
+            // only after B<new>,<old>.
+            vTaskDelay(pdMS_TO_TICKS(50));
+            uint16_t a = 0, n = 0;
+            while (Serial.available() > 0 && isdigit(Serial.peek()))
+                a = a * 10 + (Serial.read() - '0');
+            if (Serial.available() > 0 && Serial.peek() == ',')
+            {
+                Serial.read();
+                while (Serial.available() > 0 && isdigit(Serial.peek()))
+                    n = n * 10 + (Serial.read() - '0');
+            }
+            Loco *l = Loco::findLoco(a);
+            if (l == nullptr || n == 0 || n > 16383 || Loco::findLoco(n) != nullptr)
+                Serial.println("\nB: B<address of a known locomotive>,<free new address 1..16383>, B2575,10 for example");
+            else if (!Centrale::power())
+                Serial.println("\nB: the track is off");
+            else
+            {
+                const uint32_t uid = l->uid32();
+                Loco *m = locoAt(uid, n);
+                sendBind(m);
+                LocoStore::save();
+                Serial.printf("\nTest: %08lX moved from address %u to %u (Rocrail is not told; B%u,%u to go back)\n",
+                              (unsigned long)uid, a, n, n, a);
+            }
+        }
         else if (c == 'S' || c == 'T')
         {
             // S<UID in hex>[,count]: search questions with the whole UID (50).
@@ -1011,7 +1045,7 @@ static void console()
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
                           "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "
                           "T<UID>[,1] = test bench, search questions for every count (,1: other bits at 1), "
-                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I10 default), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I10 default), B<addr>,<new> = move a locomotive to another address (test), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }
