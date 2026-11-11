@@ -28,6 +28,12 @@
      between two chunks then falls in that hold.
    - As a Marklin MS2 does, the command station frame (UID and counter) is
      inserted between the question and the feedback request (MfxSignal).
+   - DCC and MM (DccLocos.h, MmLocos.h), as the Gleisbox: a round of DCC
+     packets and MM pairs, one per locomotive, one chunk each, then about
+     30 ms of mfx (DccLocos::MFX_SLOT_US). An order of the master goes into
+     the next round. Between two DCC chunks, the idle time of the RMT falls
+     in the first half of a start bit, which may be stretched (DccPacket.h);
+     between two MM chunks, in the rest after a pair.
 
 */
 
@@ -35,6 +41,10 @@
 #include "Feedback.h"
 #include "Centrale.h"
 #include "MfxFrame.h"
+#include "DccLocos.h"
+#include "DccPacket.h"
+#include "MmLocos.h"
+#include "MmPacket.h"
 #include "esp_timer.h"
 #include "esp_rom_gpio.h" // esp_rom_gpio_pad_select_gpio, esp_rom_gpio_connect_out_signal
 #include "driver/gpio.h"
@@ -43,6 +53,12 @@
 #include "soc/soc_caps.h"     // SOC_RMT_MEM_WORDS_PER_CHANNEL
 
 #define RMT_RESOLUTION_HZ 1000000 // 1 µs per tick
+
+// A round: at most this many MM pairs (13 ms each), and then at most this
+// many DCC packets (7 ms each), so that the mfx signal comes back within
+// about 75 ms, as on the Gleisbox
+static const uint8_t MM_ROUND = 3;
+static const uint8_t DCC_ROUND_WITH_MM = 5;
 
 rmt_symbol_word_t RMTChannel::sItems[2][MfxSignal::MAX_ITEMS];
 uint8_t RMTChannel::sCurrent = 0;
@@ -142,9 +158,41 @@ void RMTChannel::signalTask(void *parameter)
     static MfxSignal signal; // static: too large for the task stack
     uint8_t frame[BUFFER_SIZE];
     bool lastWasFeedback = false;
+    static Dcc::Packet dcc[DccLocos::MAX_ROUND];
+    static Mm::Packet mm[MM_ROUND];
+    int64_t roundEnd = 0; // end of the last DCC/MM round (esp_timer, µs)
 
     for (;;)
     {
+        // DCC and MM round: when an order waits, or after the mfx slot. The
+        // previous chunk has just started: the time is about its start.
+        const bool dccOn = DccLocos::enabled(), mmOn = MmLocos::enabled();
+        const bool urgent = (dccOn && DccLocos::urgent()) || (mmOn && MmLocos::urgent());
+        const uint8_t mmCount = mmOn ? MmLocos::count() : 0;
+        const bool any = (dccOn && DccLocos::count() != 0) || mmCount != 0;
+        if (urgent || (any && esp_timer_get_time() - roundEnd >= (int64_t)DccLocos::MFX_SLOT_US))
+        {
+            // With MM locomotives (a pair lasts 13 ms), fewer DCC packets
+            const uint8_t nd = dccOn ? DccLocos::round(dcc, mmCount ? DCC_ROUND_WITH_MM : DccLocos::MAX_ROUND) : 0;
+            const uint8_t nm = mmOn ? MmLocos::round(mm, MM_ROUND) : 0;
+            for (uint8_t i = 0; i < nd; i++)
+            {
+                signal.clear();
+                Dcc::encode(signal, dcc[i], i == 0, i + 1 < nd);
+                const int64_t start = send(signal);
+                roundEnd = start + signal.durationUs();
+            }
+            for (uint8_t i = 0; i < nm; i++)
+            {
+                signal.clear();
+                Mm::encodePair(signal, mm[i], i == 0);
+                const int64_t start = send(signal);
+                roundEnd = start + signal.durationUs();
+            }
+            if (nd || nm)
+                continue;
+        }
+
         signal.clear(); // keeps the level reached by the previous chunk
         const bool startLevel = signal.level();
         bool feedback = false;

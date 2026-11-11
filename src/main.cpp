@@ -25,6 +25,8 @@
 #include "Centrale.h"
 #include "CurrentMonitor.h"
 #include "Discovery.h"
+#include "DccLocos.h"
+#include "MmLocos.h"
 #include "Feedback.h"
 #include "Loco.h"
 #include "LocoStore.h"
@@ -265,6 +267,10 @@ void setup()
   // CV (DATA), or both (BOTH). SCOPE_OFF: pin not used.
   // Third parameter: only the reads of this address (0: every address).
   Feedback::setScope(GPIO_NUM_25, Feedback::SCOPE_OFF);
+
+  // DCC and MM locomotives of the refresh, kept in the NVS, before the signal task
+  DccLocos::setup();
+  MmLocos::setup();
 
   // Initialize RMTChannel
   RMTChannel::setup(IN1_pin, IN2_pin);

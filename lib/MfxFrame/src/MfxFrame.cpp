@@ -72,6 +72,14 @@ void MfxFrame::functions16(uint16_t mask)
     put(mask, 16); // F15 first, F0 last
 }
 
+void MfxFrame::function(uint8_t number, bool on)
+{
+    put(0b100, 3);
+    put(number & 0x7F, 7);
+    put(0, 1);
+    put(on ? 1 : 0, 1);
+}
+
 void MfxFrame::verify(uint32_t uid)
 {
     put(0b111100, 6);

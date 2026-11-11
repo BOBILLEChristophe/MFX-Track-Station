@@ -2,7 +2,7 @@
 
 *[English version](README.en.md)*
 
-Centrale numérique DIY compatible mfx® sur ESP32, pour piloter des locomotives Märklin au format mfx, sans Gleisbox ni Central Station. Le signal de voie est généré par le périphérique RMT de l'ESP32.
+Centrale numérique DIY compatible mfx® sur ESP32, pour piloter des locomotives Märklin au format mfx, ainsi qu'en DCC et en Motorola MM2, sans Gleisbox ni Central Station. Le signal de voie est généré par le périphérique RMT de l'ESP32.
 
 *Anciennement directMFX_ESP32 : les anciens liens redirigent ici.*
 
@@ -12,10 +12,11 @@ Ce projet fait l'objet d'un fil sur le forum 3R : https://forum.3rails.fr/t/cont
 
 ### Ce qui fonctionne aujourd'hui
 
-- **Signal mfx** généré par le RMT de l'ESP32 : vitesse (127 crans), direction et fonctions F0 à F15.
+- **Signal mfx** généré par le RMT de l'ESP32 : vitesse (127 crans), direction et fonctions F0 à F31 : F0 à F15 avec la vitesse, F16 et au-delà une par une (commande `100`, Krauss 3.1.6), envoyées aussitôt puis répétées à tour de rôle par le rafraîchissement.
 - **Pilotage depuis Rocrail** en WiFi, avec le protocole de la CS2 (port TCP 15731). Rocrail peut se déconnecter et se reconnecter sans redémarrer la centrale.
 - **La centrale se comporte comme une Gleisbox Märklin**, et Rocrail (option **Master** du pilote MBUS) comme la MS2 : posez une locomotive mfx sur la voie, la centrale la trouve et la signale à Rocrail, qui lui donne une adresse, lit son nom et **crée la locomotive dans sa liste**. Rien à déclarer, ni dans `src/main.cpp`, ni à la main dans Rocrail (pensez seulement à enregistrer le plan). Essayé avec quatre locomotives (deux décodeurs ESU, deux Märklin).
-- **Plusieurs locomotives** (16 au plus pilotées en même temps).
+- **DCC et MM2, comme la Gleisbox** : les locomotives DCC (identifiants 0xC000 + adresse) et Motorola MM2 (adresses 1 à 80) se pilotent depuis Rocrail ou la MS2 (vitesse, sens, fonctions : F0 à F28 en DCC, F0 à F4 en MM2). Le signal et le rafraîchissement reprennent ceux d'une Gleisbox relevés avec un renifleur : demi-bits DCC de 58 et 100 µs, préambule de 21 bits, crans 14, 28 ou 128 réglés par le maître ; trames MM2 de 208 µs envoyées deux fois ; un paquet par locomotive à chaque tour, puis environ 30 ms de mfx. Toute locomotive commandée une fois reste rafraîchie, même hors de la voie (la liste est gardée en mémoire ; commande série `L`).
+- **Plusieurs locomotives** (16 mfx au plus pilotées en même temps, 32 DCC et 32 MM).
 - **Présence des locomotives** : chacune est interrogée à tour de rôle, comme le fait la MS2, ce qui garde son inscription ; le moniteur série signale une locomotive qui quitte la voie ou qui y revient.
 - **Bus CAN et MS2** : une MS2 branchée sur le bus CAN de la Box pilote la centrale en esclave (liste des locomotives avec leurs noms, vitesse, sens, fonctions), Rocrail restant le maître et suivant ce qui est fait sur la MS2 (voir plus bas).
 - **Suppression d'une locomotive**, comme sur la MS2 (ordre du maître, ou commande `D` du moniteur série).
@@ -28,7 +29,7 @@ Ce projet fait l'objet d'un fil sur le forum 3R : https://forum.3rails.fr/t/cont
 - Bruit des moteurs avec le comparateur à 1 MΩ : à vérifier pendant une lecture.
 - Écriture des CV.
 - MS2 : demande « langver » (version du fichier de langue) sans réponse ; canaux de mesure (courant, tension, température) comme la Gleisbox.
-- Fonctions F16 et au-delà, réponses à Rocrail (surcharge).
+- Réponses à Rocrail (surcharge).
 - Circuit imprimé pour le capteur de retour.
 
 ### Matériel requis

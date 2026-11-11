@@ -32,6 +32,15 @@ void MfxSignal::hold(uint32_t us)
     push(mLevel, mLevel, first, (uint16_t)(us - first));
 }
 
+void MfxSignal::half(uint16_t us)
+{
+    if (us > 65534)
+        us = 65534;
+    mLevel = !mLevel;
+    const uint16_t first = (uint16_t)(us / 2);
+    push(mLevel, mLevel, first, (uint16_t)(us - first));
+}
+
 uint32_t MfxSignal::durationUs() const
 {
     uint32_t us = 0;

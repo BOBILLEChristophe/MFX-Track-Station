@@ -11,6 +11,8 @@
 #include "MfxFrame.h"
 #include "Cs2Config.h"
 #include "Discovery.h"
+#include "DccLocos.h"
+#include "MmLocos.h"
 
 Loco **Message::loco = nullptr;
 volatile byte Message::locoSize = 0;
@@ -108,12 +110,33 @@ void Message::driveFrame(Loco *l, byte *out, size_t outSize)
 }
 
 /*
+ One function, F16 and beyond (Krauss 3.1.6: 100 NNNNNNN 0 F). The drive
+ frame only carries F0 to F15.
+*/
+void Message::functionFrame(Loco *l, uint8_t fn, byte *out, size_t outSize)
+{
+    MfxFrame frame;
+    frame.address(l->addr());
+    frame.function(fn, l->funct(fn) != 0);
+    frame.finish();
+    frame.toBuffer(out, outSize);
+}
+
+/*
  A command from Rocrail is sent at once, at the head of the queue, instead
  of waiting for the next refresh (up to 50 ms). The refresh repeats it.
+ A function from F16 is sent twice: the refresh repeats it less often.
 */
-void Message::sendNow(Loco *l)
+void Message::sendNow(Loco *l, int fn)
 {
     byte frame[BUFF_MSG_SIZE];
+    if (fn >= 16 && fn < Loco::FUNCTIONS)
+    {
+        functionFrame(l, (uint8_t)fn, frame, sizeof(frame));
+        xQueueSendToFront(mfxQueue, frame, 0);
+        xQueueSendToFront(mfxQueue, frame, 0);
+        return;
+    }
     driveFrame(l, frame, sizeof(frame));
     xQueueSendToFront(mfxQueue, frame, 0);
 }
@@ -129,8 +152,11 @@ void Message::periodic(void *p)
 
     // byte buff[BUFF_MSG_SIZE] = {0};
 
+    uint32_t cycle = 0;
     for (;;)
     {
+        // F16 and beyond: one of them per locomotive, every few cycles
+        const bool high = (cycle++ % HIGH_REFRESH_CYCLES) == 0;
         for (byte i = 0; i < locoSize; i++)
         {
             if (xSemaphoreTake(taskSemaphore, portMAX_DELAY) == pdTRUE)
@@ -143,6 +169,13 @@ void Message::periodic(void *p)
                     driveFrame(loco[i], buff, sizeof(buff));
 
                     xQueueSend(mfxQueue, &buff, 0);
+
+                    const int8_t fn = high ? loco[i]->nextHighFunction() : -1;
+                    if (fn >= 0)
+                    {
+                        functionFrame(loco[i], (uint8_t)fn, buff, sizeof(buff));
+                        xQueueSend(mfxQueue, &buff, 0);
+                    }
                 }
                 vTaskDelay(pdMS_TO_TICKS(5));
             }
@@ -278,13 +311,42 @@ void Message::parse()
         {
             const uint16_t locId = (uint16_t)data[2] << 8 | data[3];
             if (locId >= 0x4000 && locId < 0x8000)
+            {
                 if (Loco *l = Loco::findLoco(locId - 0x4000))
                 {
                     l->speed(0);
                     sendNow(l);
                 }
+            }
+            else if (locId >= DccLocos::FIRST_ID)
+                DccLocos::emergencyStop(locId - DccLocos::FIRST_ID);
+            else if (locId < 0x4000)
+                MmLocos::emergencyStop(locId);
             break;
         }
+        case 0x04: // end of the refresh of a locomotive ("Lok Zyklus Ende")
+        {
+            const uint16_t locId = (uint16_t)data[2] << 8 | data[3];
+            if (locId >= DccLocos::FIRST_ID)
+                DccLocos::forget(locId - DccLocos::FIRST_ID);
+            else if (locId < 0x4000)
+                MmLocos::forget(locId);
+            break;
+        }
+        case 0x05: // protocol of a locomotive ("Lok Datenprotokoll"): DCC steps
+        {
+            const uint16_t locId = (uint16_t)data[2] << 8 | data[3];
+            if (locId >= DccLocos::FIRST_ID && length >= 6)
+                DccLocos::protocol(locId - DccLocos::FIRST_ID, data[5]);
+            break;
+        }
+        case 0x08: // track protocols enabled: bit 0 MM2, bit 1 mfx, bit 2 DCC
+            if (length >= 6)
+            {
+                MmLocos::enable((data[5] & 0x01) != 0);
+                DccLocos::enable((data[5] & 0x04) != 0);
+            }
+            break;
         case 0x09: // re-registration counter, set by the master (MS2: at power on)
             if (length >= 7)
             {
@@ -341,9 +403,19 @@ void Message::parse()
         return;
     }
 
-    // CS2 locomotive identifier: mfx from 0x4000 (0x4000 + SID), else the
-    // low byte as before (MM2)
+    // CS2 locomotive identifier: MM below 0x4000 (the address), mfx from
+    // 0x4000 (0x4000 + SID), DCC from 0xC000 (0xC000 + address)
     const uint16_t locId = (uint16_t)data[2] << 8 | data[3];
+    if (locId >= DccLocos::FIRST_ID)
+    {
+        trackOrder(true, locId - DccLocos::FIRST_ID);
+        return;
+    }
+    if (locId < 0x4000)
+    {
+        trackOrder(false, locId);
+        return;
+    }
     const uint16_t address = (locId >= 0x4000 && locId < 0x8000) ? locId - 0x4000 : data[3];
     Loco *currentLoco = Loco::findLoco(address);
     if (currentLoco == nullptr)
@@ -417,7 +489,7 @@ void Message::parse()
                        (cmd == CAN_LOCO_DIREC && length >= 5) ||
                        (cmd == CAN_LOCO_FUNCT && length >= 6);
     if (order)
-        sendNow(currentLoco);
+        sendNow(currentLoco, cmd == CAN_LOCO_FUNCT ? data[4] : -1);
     locoAnswer(currentLoco);
 
     if (traceCommands)
@@ -426,6 +498,63 @@ void Message::parse()
                       cmd, currentLoco->name().c_str(), currentLoco->addr(),
                       currentLoco->speed(), currentLoco->dir());
     }
+}
+
+/*
+ Order or request of the master for a DCC (DccLocos) or MM (MmLocos)
+ locomotive. As for an mfx locomotive, an order is confirmed with the same
+ bytes and the response bit, a request is answered with the state of the
+ locomotive.
+*/
+void Message::trackOrder(bool dcc, uint16_t address)
+{
+    uint8_t d[8];
+    memcpy(d, data, 8);
+    uint8_t len = length;
+    switch (cmd)
+    {
+    case CAN_LOCO_SPEED:
+        if (length >= 6)
+        {
+            const uint16_t v = (uint16_t)(data[4] << 8 | data[5]);
+            dcc ? DccLocos::speed(address, v) : MmLocos::speed(address, v);
+        }
+        else
+        {
+            const uint16_t v = dcc ? DccLocos::cs2Speed(address) : MmLocos::cs2Speed(address);
+            d[4] = (uint8_t)(v >> 8);
+            d[5] = (uint8_t)v;
+            len = 6;
+        }
+        break;
+    case CAN_LOCO_DIREC:
+        if (length >= 5)
+            dcc ? DccLocos::direction(address, data[4]) : MmLocos::direction(address, data[4]);
+        else
+        {
+            d[4] = dcc ? DccLocos::cs2Direction(address) : MmLocos::cs2Direction(address);
+            len = 5;
+        }
+        break;
+    case CAN_LOCO_FUNCT:
+        if (length >= 6)
+            dcc ? DccLocos::function(address, data[4], data[5] != 0) : MmLocos::function(address, data[4], data[5] != 0);
+        else if (length == 5)
+        {
+            d[5] = (dcc ? DccLocos::functionOn(address, data[4]) : MmLocos::functionOn(address, data[4])) ? 1 : 0;
+            len = 6;
+        }
+        else
+            return;
+        break;
+    default:
+        return;
+    }
+    answer(cmd, len, d);
+    if (traceCommands)
+        Serial.printf("cmd %u, %s %u : vitesse %u/1000, direction %u\n", cmd, dcc ? "DCC" : "MM", address,
+                      dcc ? DccLocos::cs2Speed(address) : MmLocos::cs2Speed(address),
+                      dcc ? DccLocos::cs2Direction(address) : MmLocos::cs2Direction(address));
 }
 
 /*
@@ -534,8 +663,9 @@ void Message::systemAnswer()
 {
     const uint32_t own = Centrale::gUid();
     const uint32_t to = (uint32_t)data[0] << 24 | (uint32_t)data[1] << 16 | (uint32_t)data[2] << 8 | data[3];
-    // Emergency stop of a locomotive (0x03): the UID field is the loco id
-    if (to != 0 && to != own && !(length >= 5 && data[4] == 0x03))
+    // Commands for one locomotive (0x03, 0x04, 0x05): the UID field is the loco id
+    const bool forLoco = length >= 5 && (data[4] == 0x03 || data[4] == 0x04 || data[4] == 0x05);
+    if (to != 0 && to != own && !forLoco)
         return;
     uint8_t d[8];
     memcpy(d, data, 8);
@@ -546,6 +676,8 @@ void Message::systemAnswer()
     case 0x01: // GO
     case 0x02: // halt
     case 0x03: // emergency stop of a locomotive (recorded: echoed by the Gleisbox)
+    case 0x04: // end of the refresh of a locomotive
+    case 0x05: // protocol of a locomotive
     case 0x08: // track protocols
     case 0x09: // re-registration counter
         break;
