@@ -13,6 +13,7 @@
 #include "MfxConfig.h"
 #include "Cs2Config.h"
 #include "LocoStore.h"
+#include "DccLocos.h"
 #include "MfxSignal.h"
 #include "MfxRMT.h"
 #include <unordered_map>
@@ -893,7 +894,10 @@ static void console()
                 Serial.println("Verify: the track is off");
         }
         else if (c == 'L')
+        {
             LocoStore::print();
+            DccLocos::print();
+        }
         else if (c == 'C')
         {
             // Read the configurations again (a decoder changed, or to test
@@ -1156,7 +1160,7 @@ static void console()
         }
         else if (c == '?')
             Serial.printf("\nCommands: R = re-registration of every decoder (counter %u -> %u, restart), "
-                          "V = verify every declared locomotive, L = list the locomotives, C = read the configurations again (C404: one locomotive), "
+                          "V = verify every declared locomotive, L = list the locomotives (mfx, then DCC), C = read the configurations again (C404: one locomotive), "
                           "D<address> = delete one locomotive (D4), M<address>[,n] = test bench, n verifies (M404,50), "
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
                           "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "

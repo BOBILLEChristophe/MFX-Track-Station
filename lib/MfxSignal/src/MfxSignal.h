@@ -151,6 +151,10 @@ public:
     // two halves of us/2). us <= 65534.
     void hold(uint32_t us);
 
+    // A transition, then us µs without transition (one item, two halves of
+    // us/2). Used for the half-bits of DCC and Motorola (DccSignal). us <= 65534.
+    void half(uint16_t us);
+
     // Request for a 1-bit feedback, to add after the frame:
     //   [synchronisation, the frame `insert` (format of MfxFrame::toBuffer()),
     //   if not null: the MS2 sends its command station frame there,]

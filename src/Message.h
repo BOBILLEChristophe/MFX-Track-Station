@@ -113,6 +113,8 @@ private:
     static void pingAnswer();
     // As a Gleisbox: confirms an order to a locomotive, answers a request
     static void locoAnswer(Loco *l);
+    // Order or request for a DCC locomotive (identifier 0xC000 + address)
+    static void dccOrder(uint16_t address);
     // As a Gleisbox: answers a system command (echo, or the identifier)
     static void systemAnswer();
     // As a Gleisbox: the description of the device (command 0x1D, index 0)

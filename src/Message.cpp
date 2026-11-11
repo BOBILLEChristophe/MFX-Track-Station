@@ -11,6 +11,7 @@
 #include "MfxFrame.h"
 #include "Cs2Config.h"
 #include "Discovery.h"
+#include "DccLocos.h"
 
 Loco **Message::loco = nullptr;
 volatile byte Message::locoSize = 0;
@@ -309,13 +310,35 @@ void Message::parse()
         {
             const uint16_t locId = (uint16_t)data[2] << 8 | data[3];
             if (locId >= 0x4000 && locId < 0x8000)
+            {
                 if (Loco *l = Loco::findLoco(locId - 0x4000))
                 {
                     l->speed(0);
                     sendNow(l);
                 }
+            }
+            else if (locId >= DccLocos::FIRST_ID)
+                DccLocos::emergencyStop(locId - DccLocos::FIRST_ID);
             break;
         }
+        case 0x04: // end of the refresh of a locomotive ("Lok Zyklus Ende")
+        {
+            const uint16_t locId = (uint16_t)data[2] << 8 | data[3];
+            if (locId >= DccLocos::FIRST_ID)
+                DccLocos::forget(locId - DccLocos::FIRST_ID);
+            break;
+        }
+        case 0x05: // protocol of a locomotive ("Lok Datenprotokoll"): DCC steps
+        {
+            const uint16_t locId = (uint16_t)data[2] << 8 | data[3];
+            if (locId >= DccLocos::FIRST_ID && length >= 6)
+                DccLocos::protocol(locId - DccLocos::FIRST_ID, data[5]);
+            break;
+        }
+        case 0x08: // track protocols enabled: bit 0 MM2, bit 1 mfx, bit 2 DCC
+            if (length >= 6)
+                DccLocos::enable((data[5] & 0x04) != 0);
+            break;
         case 0x09: // re-registration counter, set by the master (MS2: at power on)
             if (length >= 7)
             {
@@ -372,9 +395,14 @@ void Message::parse()
         return;
     }
 
-    // CS2 locomotive identifier: mfx from 0x4000 (0x4000 + SID), else the
-    // low byte as before (MM2)
+    // CS2 locomotive identifier: mfx from 0x4000 (0x4000 + SID), DCC from
+    // 0xC000 (0xC000 + address), else the low byte as before (MM2)
     const uint16_t locId = (uint16_t)data[2] << 8 | data[3];
+    if (locId >= DccLocos::FIRST_ID)
+    {
+        dccOrder(locId - DccLocos::FIRST_ID);
+        return;
+    }
     const uint16_t address = (locId >= 0x4000 && locId < 0x8000) ? locId - 0x4000 : data[3];
     Loco *currentLoco = Loco::findLoco(address);
     if (currentLoco == nullptr)
@@ -457,6 +485,58 @@ void Message::parse()
                       cmd, currentLoco->name().c_str(), currentLoco->addr(),
                       currentLoco->speed(), currentLoco->dir());
     }
+}
+
+/*
+ Order or request of the master for a DCC locomotive (DccLocos). As for an
+ mfx locomotive, an order is confirmed with the same bytes and the response
+ bit, a request is answered with the state of the locomotive.
+*/
+void Message::dccOrder(uint16_t address)
+{
+    uint8_t d[8];
+    memcpy(d, data, 8);
+    uint8_t len = length;
+    switch (cmd)
+    {
+    case CAN_LOCO_SPEED:
+        if (length >= 6)
+            DccLocos::speed(address, (uint16_t)(data[4] << 8 | data[5]));
+        else
+        {
+            const uint16_t v = DccLocos::cs2Speed(address);
+            d[4] = (uint8_t)(v >> 8);
+            d[5] = (uint8_t)v;
+            len = 6;
+        }
+        break;
+    case CAN_LOCO_DIREC:
+        if (length >= 5)
+            DccLocos::direction(address, data[4]);
+        else
+        {
+            d[4] = DccLocos::cs2Direction(address);
+            len = 5;
+        }
+        break;
+    case CAN_LOCO_FUNCT:
+        if (length >= 6)
+            DccLocos::function(address, data[4], data[5] != 0);
+        else if (length == 5)
+        {
+            d[5] = DccLocos::functionOn(address, data[4]) ? 1 : 0;
+            len = 6;
+        }
+        else
+            return;
+        break;
+    default:
+        return;
+    }
+    answer(cmd, len, d);
+    if (traceCommands)
+        Serial.printf("cmd %u, DCC %u : vitesse %u/1000, direction %u\n", cmd, address, DccLocos::cs2Speed(address),
+                      DccLocos::cs2Direction(address));
 }
 
 /*
@@ -565,8 +645,9 @@ void Message::systemAnswer()
 {
     const uint32_t own = Centrale::gUid();
     const uint32_t to = (uint32_t)data[0] << 24 | (uint32_t)data[1] << 16 | (uint32_t)data[2] << 8 | data[3];
-    // Emergency stop of a locomotive (0x03): the UID field is the loco id
-    if (to != 0 && to != own && !(length >= 5 && data[4] == 0x03))
+    // Commands for one locomotive (0x03, 0x04, 0x05): the UID field is the loco id
+    const bool forLoco = length >= 5 && (data[4] == 0x03 || data[4] == 0x04 || data[4] == 0x05);
+    if (to != 0 && to != own && !forLoco)
         return;
     uint8_t d[8];
     memcpy(d, data, 8);
@@ -577,6 +658,8 @@ void Message::systemAnswer()
     case 0x01: // GO
     case 0x02: // halt
     case 0x03: // emergency stop of a locomotive (recorded: echoed by the Gleisbox)
+    case 0x04: // end of the refresh of a locomotive
+    case 0x05: // protocol of a locomotive
     case 0x08: // track protocols
     case 0x09: // re-registration counter
         break;

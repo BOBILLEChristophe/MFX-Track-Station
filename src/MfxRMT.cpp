@@ -28,6 +28,11 @@
      between two chunks then falls in that hold.
    - As a Marklin MS2 does, the command station frame (UID and counter) is
      inserted between the question and the feedback request (MfxSignal).
+   - DCC (DccLocos.h), as the Gleisbox: a round of DCC packets, one per
+     locomotive, one chunk per packet, then about 30 ms of mfx
+     (DccLocos::MFX_SLOT_US). An order of the master goes into the next
+     chunk. Between two DCC chunks, the idle time of the RMT falls in the
+     first half of a start bit, which may be stretched (DccPacket.h).
 
 */
 
@@ -35,6 +40,8 @@
 #include "Feedback.h"
 #include "Centrale.h"
 #include "MfxFrame.h"
+#include "DccLocos.h"
+#include "DccPacket.h"
 #include "esp_timer.h"
 #include "esp_rom_gpio.h" // esp_rom_gpio_pad_select_gpio, esp_rom_gpio_connect_out_signal
 #include "driver/gpio.h"
@@ -142,9 +149,29 @@ void RMTChannel::signalTask(void *parameter)
     static MfxSignal signal; // static: too large for the task stack
     uint8_t frame[BUFFER_SIZE];
     bool lastWasFeedback = false;
+    static Dcc::Packet dcc[DccLocos::MAX_ROUND];
+    int64_t dccEnd = 0; // end of the last DCC round (esp_timer, µs)
 
     for (;;)
     {
+        // DCC round: when an order waits, or after the mfx slot. The
+        // previous chunk has just started: the time is about its start.
+        if (DccLocos::enabled() &&
+            (DccLocos::urgent() ||
+             (DccLocos::count() != 0 && esp_timer_get_time() - dccEnd >= (int64_t)DccLocos::MFX_SLOT_US)))
+        {
+            const uint8_t n = DccLocos::round(dcc, DccLocos::MAX_ROUND);
+            for (uint8_t i = 0; i < n; i++)
+            {
+                signal.clear();
+                Dcc::encode(signal, dcc[i], i == 0, i + 1 < n);
+                const int64_t start = send(signal);
+                dccEnd = start + signal.durationUs();
+            }
+            if (n)
+                continue;
+        }
+
         signal.clear(); // keeps the level reached by the previous chunk
         const bool startLevel = signal.level();
         bool feedback = false;
