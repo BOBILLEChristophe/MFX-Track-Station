@@ -12,6 +12,7 @@
 #include "Cs2Config.h"
 #include "Discovery.h"
 #include "DccLocos.h"
+#include "MmLocos.h"
 
 Loco **Message::loco = nullptr;
 volatile byte Message::locoSize = 0;
@@ -319,6 +320,8 @@ void Message::parse()
             }
             else if (locId >= DccLocos::FIRST_ID)
                 DccLocos::emergencyStop(locId - DccLocos::FIRST_ID);
+            else if (locId < 0x4000)
+                MmLocos::emergencyStop(locId);
             break;
         }
         case 0x04: // end of the refresh of a locomotive ("Lok Zyklus Ende")
@@ -326,6 +329,8 @@ void Message::parse()
             const uint16_t locId = (uint16_t)data[2] << 8 | data[3];
             if (locId >= DccLocos::FIRST_ID)
                 DccLocos::forget(locId - DccLocos::FIRST_ID);
+            else if (locId < 0x4000)
+                MmLocos::forget(locId);
             break;
         }
         case 0x05: // protocol of a locomotive ("Lok Datenprotokoll"): DCC steps
@@ -337,7 +342,10 @@ void Message::parse()
         }
         case 0x08: // track protocols enabled: bit 0 MM2, bit 1 mfx, bit 2 DCC
             if (length >= 6)
+            {
+                MmLocos::enable((data[5] & 0x01) != 0);
                 DccLocos::enable((data[5] & 0x04) != 0);
+            }
             break;
         case 0x09: // re-registration counter, set by the master (MS2: at power on)
             if (length >= 7)
@@ -395,12 +403,17 @@ void Message::parse()
         return;
     }
 
-    // CS2 locomotive identifier: mfx from 0x4000 (0x4000 + SID), DCC from
-    // 0xC000 (0xC000 + address), else the low byte as before (MM2)
+    // CS2 locomotive identifier: MM below 0x4000 (the address), mfx from
+    // 0x4000 (0x4000 + SID), DCC from 0xC000 (0xC000 + address)
     const uint16_t locId = (uint16_t)data[2] << 8 | data[3];
     if (locId >= DccLocos::FIRST_ID)
     {
-        dccOrder(locId - DccLocos::FIRST_ID);
+        trackOrder(true, locId - DccLocos::FIRST_ID);
+        return;
+    }
+    if (locId < 0x4000)
+    {
+        trackOrder(false, locId);
         return;
     }
     const uint16_t address = (locId >= 0x4000 && locId < 0x8000) ? locId - 0x4000 : data[3];
@@ -488,11 +501,12 @@ void Message::parse()
 }
 
 /*
- Order or request of the master for a DCC locomotive (DccLocos). As for an
- mfx locomotive, an order is confirmed with the same bytes and the response
- bit, a request is answered with the state of the locomotive.
+ Order or request of the master for a DCC (DccLocos) or MM (MmLocos)
+ locomotive. As for an mfx locomotive, an order is confirmed with the same
+ bytes and the response bit, a request is answered with the state of the
+ locomotive.
 */
-void Message::dccOrder(uint16_t address)
+void Message::trackOrder(bool dcc, uint16_t address)
 {
     uint8_t d[8];
     memcpy(d, data, 8);
@@ -501,10 +515,13 @@ void Message::dccOrder(uint16_t address)
     {
     case CAN_LOCO_SPEED:
         if (length >= 6)
-            DccLocos::speed(address, (uint16_t)(data[4] << 8 | data[5]));
+        {
+            const uint16_t v = (uint16_t)(data[4] << 8 | data[5]);
+            dcc ? DccLocos::speed(address, v) : MmLocos::speed(address, v);
+        }
         else
         {
-            const uint16_t v = DccLocos::cs2Speed(address);
+            const uint16_t v = dcc ? DccLocos::cs2Speed(address) : MmLocos::cs2Speed(address);
             d[4] = (uint8_t)(v >> 8);
             d[5] = (uint8_t)v;
             len = 6;
@@ -512,19 +529,19 @@ void Message::dccOrder(uint16_t address)
         break;
     case CAN_LOCO_DIREC:
         if (length >= 5)
-            DccLocos::direction(address, data[4]);
+            dcc ? DccLocos::direction(address, data[4]) : MmLocos::direction(address, data[4]);
         else
         {
-            d[4] = DccLocos::cs2Direction(address);
+            d[4] = dcc ? DccLocos::cs2Direction(address) : MmLocos::cs2Direction(address);
             len = 5;
         }
         break;
     case CAN_LOCO_FUNCT:
         if (length >= 6)
-            DccLocos::function(address, data[4], data[5] != 0);
+            dcc ? DccLocos::function(address, data[4], data[5] != 0) : MmLocos::function(address, data[4], data[5] != 0);
         else if (length == 5)
         {
-            d[5] = DccLocos::functionOn(address, data[4]) ? 1 : 0;
+            d[5] = (dcc ? DccLocos::functionOn(address, data[4]) : MmLocos::functionOn(address, data[4])) ? 1 : 0;
             len = 6;
         }
         else
@@ -535,8 +552,9 @@ void Message::dccOrder(uint16_t address)
     }
     answer(cmd, len, d);
     if (traceCommands)
-        Serial.printf("cmd %u, DCC %u : vitesse %u/1000, direction %u\n", cmd, address, DccLocos::cs2Speed(address),
-                      DccLocos::cs2Direction(address));
+        Serial.printf("cmd %u, %s %u : vitesse %u/1000, direction %u\n", cmd, dcc ? "DCC" : "MM", address,
+                      dcc ? DccLocos::cs2Speed(address) : MmLocos::cs2Speed(address),
+                      dcc ? DccLocos::cs2Direction(address) : MmLocos::cs2Direction(address));
 }
 
 /*

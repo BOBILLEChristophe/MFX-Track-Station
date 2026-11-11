@@ -14,6 +14,7 @@
 #include "Cs2Config.h"
 #include "LocoStore.h"
 #include "DccLocos.h"
+#include "MmLocos.h"
 #include "MfxSignal.h"
 #include "MfxRMT.h"
 #include <unordered_map>
@@ -897,6 +898,13 @@ static void console()
         {
             LocoStore::print();
             DccLocos::print();
+            MmLocos::print();
+        }
+        else if (c == 'G')
+        {
+            // Test: polarity of the MM pulses (the Gleisbox: pol=H on the sniffer)
+            Mm::pulseLevel = !Mm::pulseLevel;
+            Serial.printf("MM: pulses at level %u\n", Mm::pulseLevel ? 1 : 0);
         }
         else if (c == 'C')
         {
@@ -1160,7 +1168,7 @@ static void console()
         }
         else if (c == '?')
             Serial.printf("\nCommands: R = re-registration of every decoder (counter %u -> %u, restart), "
-                          "V = verify every declared locomotive, L = list the locomotives (mfx, then DCC), C = read the configurations again (C404: one locomotive), "
+                          "V = verify every declared locomotive, L = list the locomotives (mfx, DCC, MM), G = polarity of the MM pulses (test), C = read the configurations again (C404: one locomotive), "
                           "D<address> = delete one locomotive (D4), M<address>[,n] = test bench, n verifies (M404,50), "
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
                           "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "
