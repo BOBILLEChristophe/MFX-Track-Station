@@ -13,6 +13,7 @@ namespace
     {
         uint16_t addr;    // 0: free
         uint8_t prot;     // CS2 protocol (0 to 4, see DccLocos.h)
+        bool active;      // in the refresh: driven at least once by the master
         uint16_t v;       // CS2 speed, 0 to 1000
         bool forward;
         bool emergency;   // emergency stop until the next speed order
@@ -161,7 +162,7 @@ namespace
             if (sLocos[i].addr != 0)
             {
                 r[n].addr = sLocos[i].addr;
-                r[n].prot = sLocos[i].prot;
+                r[n].prot = (uint8_t)(sLocos[i].prot | (sLocos[i].active ? 0x80 : 0));
                 n++;
             }
         portEXIT_CRITICAL(&sMux);
@@ -177,14 +178,25 @@ namespace
 
     // Common part of the orders: finds (or adds) the locomotive, applies
     // `change` and queues the packet it returns
+    // refresh: the order puts the locomotive in the refresh (all of them but
+    // the protocol, which only records the steps for later)
     template <typename F>
-    bool order(uint16_t addr, F change)
+    bool order(uint16_t addr, F change, bool refresh = true)
     {
         bool added;
         portENTER_CRITICAL(&sMux);
         Entry *e = findOrAdd(addr, &added);
         if (e != nullptr)
-            pushUrgent(change(*e));
+        {
+            const Dcc::Packet p = change(*e);
+            if (refresh && !e->active)
+            {
+                e->active = true;
+                added = true;
+            }
+            if (e->active)
+                pushUrgent(p);
+        }
         portEXIT_CRITICAL(&sMux);
         if (e == nullptr)
         {
@@ -192,7 +204,7 @@ namespace
                           DccLocos::MAX_LOCOS);
             return false;
         }
-        if (added)
+        if (added && refresh)
         {
             Serial.printf("DCC %u added to the refresh\n", addr);
             save();
@@ -217,13 +229,18 @@ namespace DccLocos
             {
                 prefs.getBytes(NVS_KEY, r, len);
                 const uint8_t n = (uint8_t)(len / sizeof(Record));
+                uint8_t active = 0;
                 for (uint8_t i = 0; i < n; i++)
                 {
+                    const uint8_t prot = r[i].prot & 0x7F;
                     sLocos[i].addr = r[i].addr;
-                    sLocos[i].prot = r[i].prot <= 4 ? r[i].prot : 0;
+                    sLocos[i].prot = prot <= 4 ? prot : 0;
+                    sLocos[i].active = (r[i].prot & 0x80) != 0;
                     sLocos[i].forward = true;
+                    if (sLocos[i].active)
+                        active++;
                 }
-                Serial.printf("DCC: %u locomotives in the refresh (memory)\n", n);
+                Serial.printf("DCC: %u locomotives in the refresh, %u known (memory)\n", active, n);
             }
         }
         prefs.end();
@@ -300,11 +317,19 @@ namespace DccLocos
         if (prot > 4)
             return false;
         bool changed = false;
+        bool added = false;
+        portENTER_CRITICAL(&sMux);
+        added = find(addr) == nullptr;
+        portEXIT_CRITICAL(&sMux);
+        // Only the steps: Rocrail sends them for each of its DCC locomotives
+        // at start-up, the locomotive enters the refresh at its first order
         const bool ok = order(addr, [prot, &changed](Entry &e)
                               {
                                   changed = e.prot != prot;
                                   e.prot = prot;
-                                  return speedPacket(e); });
+                                  return speedPacket(e); },
+                              false);
+        changed = changed || (ok && added);
         if (ok && changed)
         {
             Serial.printf("DCC %u: %u steps%s\n", addr, steps(prot), forceLong(prot) ? ", long address" : "");
@@ -371,7 +396,7 @@ namespace DccLocos
         uint8_t n = 0;
         portENTER_CRITICAL(&sMux);
         for (uint8_t i = 0; i < MAX_LOCOS; i++)
-            if (sLocos[i].addr != 0)
+            if (sLocos[i].addr != 0 && sLocos[i].active)
                 n++;
         portEXIT_CRITICAL(&sMux);
         return n;
@@ -398,7 +423,7 @@ namespace DccLocos
         {
             Entry &e = sLocos[sRr];
             sRr = (uint8_t)((sRr + 1) % MAX_LOCOS);
-            if (e.addr != 0)
+            if (e.addr != 0 && e.active)
                 out[n++] = refreshPacket(e);
         }
         portEXIT_CRITICAL(&sMux);
@@ -418,11 +443,17 @@ namespace DccLocos
             if (e.addr == 0)
                 continue;
             n++;
+            if (!e.active)
+            {
+                Serial.printf("  DCC %5u : %3u steps%s, never driven (not refreshed)\n", e.addr, steps(e.prot),
+                              Dcc::isLong(e.addr, forceLong(e.prot)) ? " (long)" : "");
+                continue;
+            }
             Serial.printf("  DCC %5u : %3u steps%s, speed %4u/1000 %s%s, functions %08lX\n", e.addr, steps(e.prot),
                           Dcc::isLong(e.addr, forceLong(e.prot)) ? " (long)" : "        ", e.v,
                           e.forward ? "forward " : "backward", e.emergency ? " (emergency stop)" : "",
                           (unsigned long)e.fn);
         }
-        Serial.printf("DCC: %u locomotives in the refresh, DCC %s\n", n, sEnabled ? "on" : "off (master)");
+        Serial.printf("DCC: %u locomotives known, %u in the refresh, DCC %s\n", n, count(), sEnabled ? "on" : "off (master)");
     }
 }

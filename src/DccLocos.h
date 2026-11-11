@@ -61,6 +61,9 @@ namespace DccLocos
     bool direction(uint16_t addr, uint8_t cs2Dir);  // 1 forward, 2 backward, 3 toggle
     bool function(uint16_t addr, uint8_t fn, bool on);
     bool emergencyStop(uint16_t addr);
+    // Steps only: the locomotive is NOT put in the refresh. Rocrail sends
+    // them at start-up for each DCC locomotive of its list, with the address
+    // of an mfx locomotive too (0xC000 + 404 for the mfx 404, 11 Nov 2026).
     bool protocol(uint16_t addr, uint8_t cs2Protocol);
     // Out of the refresh (system 0x04). Returns false if it was not there.
     bool forget(uint16_t addr);
