@@ -43,8 +43,9 @@ namespace MmLocos
     bool enabled();
 
     // Orders of the master (address 1 to 80). The locomotive enters the
-    // refresh at its first order. Each order is sent at once (urgent pair),
-    // then repeated by the refresh. Return false if the list is full.
+    // refresh at its first order. Each order is sent at once, as several
+    // pairs in a row as the Gleisbox does (3 for a speed or F0, 6 for F1 to
+    // F4), then repeated by the refresh. Return false if the list is full.
     bool speed(uint16_t addr, uint16_t cs2Speed);  // 0 to 1000
     bool direction(uint16_t addr, uint8_t cs2Dir); // 1 forward, 2 backward, 3 toggle
     bool function(uint16_t addr, uint8_t fn, bool on);

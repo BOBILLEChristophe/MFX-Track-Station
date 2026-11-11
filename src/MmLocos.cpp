@@ -21,7 +21,9 @@ namespace
     Entry sLocos[MmLocos::MAX_LOCOS];
     uint8_t sRr = 0;
 
-    const uint8_t URGENT = 8;
+    const uint8_t URGENT = 12;
+    const uint8_t SPEED_REPEATS = 3;
+    const uint8_t FUNCTION_REPEATS = 6;
     Mm::Packet sUrgent[URGENT];
     uint8_t sUrgentHead = 0, sUrgentCount = 0;
 
@@ -113,14 +115,22 @@ namespace
         prefs.end();
     }
 
+    // repeats: the packet of the order is sent as this many pairs, as the
+    // Gleisbox (recorded: a function switched, 6 pairs in a row, about
+    // 25 ms apart; a new speed, 2 or 3). With one pair only, the decoder of
+    // the MM 60 followed the speed and F0 but not F1 to F4 (bench, 11 Nov).
     template <typename F>
-    bool order(uint16_t addr, F change)
+    bool order(uint16_t addr, F change, uint8_t repeats = SPEED_REPEATS)
     {
         bool added;
         portENTER_CRITICAL(&sMux);
         Entry *e = findOrAdd(addr, &added);
         if (e != nullptr)
-            pushUrgent(change(*e));
+        {
+            const Mm::Packet p = change(*e);
+            for (uint8_t i = 0; i < repeats; i++)
+                pushUrgent(p);
+        }
         portEXIT_CRITICAL(&sMux);
         if (e == nullptr)
         {
@@ -212,7 +222,8 @@ namespace MmLocos
                              e.fn |= (uint8_t)(1u << fn);
                          else
                              e.fn &= (uint8_t)~(1u << fn);
-                         return fn == 0 ? speedPacket(e) : functionPacket(e, fn); });
+                         return fn == 0 ? speedPacket(e) : functionPacket(e, fn); },
+                     fn == 0 ? SPEED_REPEATS : FUNCTION_REPEATS);
     }
 
     bool emergencyStop(uint16_t addr)
@@ -289,7 +300,8 @@ namespace MmLocos
     {
         uint8_t n = 0;
         portENTER_CRITICAL(&sMux);
-        while (sUrgentCount && n < (max + 1) / 2)
+        // The orders first (the whole round if needed: they are short bursts)
+        while (sUrgentCount && n < max)
         {
             out[n++] = sUrgent[sUrgentHead];
             sUrgentHead = (uint8_t)((sUrgentHead + 1) % URGENT);
