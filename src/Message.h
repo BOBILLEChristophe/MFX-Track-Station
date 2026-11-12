@@ -23,6 +23,7 @@ const byte BUFF_MSG_SIZE = 100;
 #define CAN_LOCO_SPEED 0x04
 #define CAN_LOCO_DIREC 0x05
 #define CAN_LOCO_FUNCT 0x06
+#define CAN_ACCESSORY 0x0B           // accessory switched (Zubehör schalten)
 #define CAN_MFX_BIND 0x02           // assignment of a rail address (UID, SID)
 // Period of the command station frame (111 101, UID and counter), in ms.
 // A Marklin MS2 with its Gleisbox sends it every 46 ms (recorded on the

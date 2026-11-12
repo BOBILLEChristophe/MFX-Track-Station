@@ -64,6 +64,24 @@ void test_idle()
     check(Dcc::idle(), a, 3);
 }
 
+void test_accessory()
+{
+    // Address 1: decoder 1, pair 0, position 1, coil on: 81 F9
+    const uint8_t a[] = {0x81, 0xF9, 0x78};
+    check(Dcc::accessory(1, true, true), a, 3);
+    // Address 4: decoder 1, pair 3; address 5: decoder 2, pair 0
+    const uint8_t b[] = {0x81, 0xFE, 0x7F};
+    check(Dcc::accessory(4, false, true), b, 3);
+    const uint8_t c[] = {0x82, 0xF8, 0x7A};
+    check(Dcc::accessory(5, false, true), c, 3);
+    // Address 150: decoder 38 (0x26), pair 1; coil off
+    const uint8_t d[] = {0xA6, 0xF3, 0x55};
+    check(Dcc::accessory(150, true, false), d, 3);
+    // Address 2044: decoder 511 (high bits 111, inverted 000), pair 3
+    const uint8_t e[] = {0xBF, 0x8F, 0x30};
+    check(Dcc::accessory(2044, true, true), e, 3);
+}
+
 void test_steps_from_cs2()
 {
     // Recorded: CAN speed -> 128-step code (step + 1)
@@ -189,6 +207,7 @@ int main(int, char **)
     RUN_TEST(test_speed_128_long);
     RUN_TEST(test_functions);
     RUN_TEST(test_idle);
+    RUN_TEST(test_accessory);
     RUN_TEST(test_steps_from_cs2);
     RUN_TEST(test_encode_series);
     return UNITY_END();

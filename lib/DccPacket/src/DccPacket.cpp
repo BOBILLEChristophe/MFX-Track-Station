@@ -125,6 +125,19 @@ namespace Dcc
         return p;
     }
 
+    Packet accessory(uint16_t address, bool position, bool on)
+    {
+        Packet p;
+        const uint16_t a = (uint16_t)(address + 3); // address 1: decoder 1, pair 0
+        const uint16_t decoder = (uint16_t)(a >> 2);
+        const uint8_t pair = (uint8_t)(a & 3);
+        p.n = 0;
+        p.b[p.n++] = (uint8_t)(0x80 | (decoder & 0x3F));
+        p.b[p.n++] = (uint8_t)(0x80 | ((~decoder >> 6) & 0x07) << 4 | (on ? 0x08 : 0) | pair << 1 | (position ? 1 : 0));
+        finish(p);
+        return p;
+    }
+
     static void bit(MfxSignal &s, bool one)
     {
         const uint16_t us = one ? ONE_US : ZERO_US;

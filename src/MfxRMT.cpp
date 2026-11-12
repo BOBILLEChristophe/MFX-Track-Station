@@ -45,6 +45,7 @@
 #include "DccPacket.h"
 #include "MmLocos.h"
 #include "MmPacket.h"
+#include "Accessories.h"
 #include "esp_timer.h"
 #include "esp_rom_gpio.h" // esp_rom_gpio_pad_select_gpio, esp_rom_gpio_connect_out_signal
 #include "driver/gpio.h"
@@ -167,13 +168,18 @@ void RMTChannel::signalTask(void *parameter)
         // DCC and MM round: when an order waits, or after the mfx slot. The
         // previous chunk has just started: the time is about its start.
         const bool dccOn = DccLocos::enabled(), mmOn = MmLocos::enabled();
-        const bool urgent = (dccOn && DccLocos::urgent()) || (mmOn && MmLocos::urgent());
+        const int64_t now = esp_timer_get_time();
+        const bool urgent = (dccOn && (DccLocos::urgent() || Accessories::pending(now))) || (mmOn && MmLocos::urgent());
         const uint8_t mmCount = mmOn ? MmLocos::count() : 0;
         const bool any = (dccOn && DccLocos::count() != 0) || mmCount != 0;
-        if (urgent || (any && esp_timer_get_time() - roundEnd >= (int64_t)DccLocos::MFX_SLOT_US))
+        if (urgent || (any && now - roundEnd >= (int64_t)DccLocos::MFX_SLOT_US))
         {
-            // With MM locomotives (a pair lasts 13 ms), fewer DCC packets
-            const uint8_t nd = dccOn ? DccLocos::round(dcc, mmCount ? DCC_ROUND_WITH_MM : DccLocos::MAX_ROUND) : 0;
+            // With MM locomotives (a pair lasts 13 ms), fewer DCC packets.
+            // The accessories first (DCC only for now).
+            const uint8_t maxDcc = mmCount ? DCC_ROUND_WITH_MM : DccLocos::MAX_ROUND;
+            uint8_t nd = dccOn ? Accessories::take(dcc, 2, now) : 0;
+            if (dccOn)
+                nd += DccLocos::round(dcc + nd, (uint8_t)(maxDcc - nd));
             const uint8_t nm = mmOn ? MmLocos::round(mm, MM_ROUND) : 0;
             for (uint8_t i = 0; i < nd; i++)
             {
