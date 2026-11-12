@@ -13,6 +13,7 @@
 #include "Discovery.h"
 #include "DccLocos.h"
 #include "MmLocos.h"
+#include "Accessories.h"
 
 Loco **Message::loco = nullptr;
 volatile byte Message::locoSize = 0;
@@ -393,6 +394,33 @@ void Message::parse()
             Discovery::requestBind(uid, sid);
         else
             Discovery::requestVerify(uid, sid);
+        return;
+    }
+
+    // Accessory ("Zubehör schalten"): identifier, position, current, switch
+    // time (10 ms). An order is confirmed with the response bit; a request
+    // (identifier only) is answered with the last position.
+    if (cmd == CAN_ACCESSORY && length >= 4)
+    {
+        const uint32_t id = (uint32_t)data[0] << 24 | (uint32_t)data[1] << 16 | (uint32_t)data[2] << 8 | data[3];
+        uint8_t d[8];
+        memcpy(d, data, 8);
+        uint8_t len = length;
+        if (id > 0xFFFF)
+            return;
+        if (length >= 6)
+        {
+            const uint16_t time = length >= 8 ? (uint16_t)(data[6] << 8 | data[7]) : 0;
+            if (!Accessories::order((uint16_t)id, data[4], data[5], time))
+                return;
+        }
+        else
+        {
+            d[4] = Accessories::position((uint16_t)id);
+            d[5] = 0;
+            len = 6;
+        }
+        answer(cmd, len, d);
         return;
     }
 

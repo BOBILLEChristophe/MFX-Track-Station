@@ -83,6 +83,13 @@ namespace Dcc
     // Idle packet: FF 00 FF
     Packet idle();
 
+    // Basic accessory (S-9.2.1, RCN-213): output address 1 to 2044, as the
+    // CS2 numbers them (identifier 0x3800 + address - 1). Address 1 is
+    // decoder 1, pair 0: 10AAAAAA 1aaaCPPD, aaa = high bits inverted,
+    // C = coil on, PP = pair, D = position (0 round/red, 1 straight/green).
+    static const uint16_t MAX_ACCESSORY = 2044;
+    Packet accessory(uint16_t address, bool position, bool on);
+
     // Appends the packet to the signal. lead: the previous chunk did not end
     // in an open start bit (the preamble is sent here). more: another packet
     // follows in the next chunk (its preamble and the first half of its start
