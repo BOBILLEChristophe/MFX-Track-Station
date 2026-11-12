@@ -18,13 +18,20 @@ CurrentMonitor.h
  La tension max acceptable sur la broche de l'ESP32 est de 3,3 V.
 
  CURRENT_MV_PER_A : tension fournie par le capteur pour 1 A.
- 1000 mV par A correspond au commentaire d'origine (1000 mV -> 1 A).
- A VERIFIER sur le schéma de votre carte (La Box) avant de se fier au seuil.
+ Étalonné sur le prototype le 12 novembre 2026 : charge de 4,7 Ω à la place
+ de la voie, alimentation de labo, ampèremètre dans le + de l'alimentation.
+   ampèremètre 1,52 A -> 1746 mV ; 1,83 A -> 2104 mV : 1150 mV par A, zéro à 0.
+   1,83 A, 2,07 A, 2,31 A -> 2104, 1903, 2102 mV : la mesure SATURE vers
+   2,1 V, soit environ 1,8 A. Au-delà, la station ne voit plus le courant
+   monter : le seuil de coupure doit rester en dessous.
+ Une autre carte (nouveau circuit, autre shunt) est à étalonner de la même façon.
 */
-#define CURRENT_MV_PER_A 1000
+#define CURRENT_MV_PER_A 1150
 
-// Seuil de coupure, en mA. La limite est ici fixée à 1 A.
-#define MAX_CURRENT_MA 1000
+// Seuil de coupure, en mA réels : 1,6 A, sous la saturation de la mesure
+// (environ 1,8 A sur le prototype). La moyenne sur environ 100 ms laisse passer
+// les pointes brèves (démarrage d'une loco, décodeur sonore).
+#define MAX_CURRENT_MA 1600
 
 #define CURRENT_SAMPLE_TIME 1 // ms
 

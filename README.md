@@ -20,7 +20,7 @@ Ce projet fait l'objet d'un fil sur le forum 3R : https://forum.3rails.fr/t/cont
 - **Présence des locomotives** : chacune est interrogée à tour de rôle, comme le fait la MS2, ce qui garde son inscription ; le moniteur série signale une locomotive qui quitte la voie ou qui y revient.
 - **Bus CAN et MS2** : une MS2 branchée sur le bus CAN de la Box pilote la centrale en esclave (liste des locomotives avec leurs noms, vitesse, sens, fonctions), Rocrail restant le maître et suivant ce qui est fait sur la MS2 (voir plus bas).
 - **Suppression d'une locomotive**, comme sur la MS2 (ordre du maître, ou commande `D` du moniteur série).
-- **Protection contre les courts-circuits** : la voie est coupée au-delà du seuil (1 A par défaut) et ne repart que sur un Go de Rocrail.
+- **Protection contre les courts-circuits** : la voie est coupée au-delà du seuil (1,6 A sur le prototype étalonné, sous la saturation de sa mesure vers 1,8 A) et ne repart que sur un Go de Rocrail.
 - **FreeRTOS** : chaque fonction (signal, réception, surveillance du courant) tourne dans sa propre tâche.
 
 ### Ce qui reste à faire

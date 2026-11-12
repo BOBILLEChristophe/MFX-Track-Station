@@ -20,7 +20,7 @@ This project has a thread on the 3R forum (in French): https://forum.3rails.fr/t
 - **Presence of the locomotives**: each one is queried in turn, as the MS2 does, which keeps its registration; the serial monitor tells when a locomotive leaves the track or comes back.
 - **CAN bus and MS2**: an MS2 connected to the CAN bus of the Box drives the command station as a slave (list of the locomotives with their names, speed, direction, functions), Rocrail staying the master and following what is done on the MS2 (see below).
 - **Deletion of a locomotive**, as on the MS2 (order of the master, or serial command `D`).
-- **Short-circuit protection**: the track is switched off above the threshold (1 A by default) and only comes back on a Go from Rocrail.
+- **Short-circuit protection**: the track is switched off above the threshold (1.6 A on the calibrated prototype, below the saturation of its measurement at about 1.8 A) and only comes back on a Go from Rocrail.
 - **FreeRTOS**: each function (signal, reception, current monitoring) runs in its own task.
 
 ### Still to do
