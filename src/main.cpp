@@ -35,6 +35,8 @@
 #include "CanBus.h"
 #include "MfxRMT.h"
 #include "BuildInfo.h"
+#include "Board.h"
+#include "RailCom.h"
 
 // Central system ID used for identification
 const uint32_t idCentrale = 0x476bb7dc;
@@ -46,14 +48,15 @@ const uint32_t idCentrale = 0x476bb7dc;
 const uint8_t BUFFER_S = 13; // Size of communication buffers
 uint8_t rxBuffer[BUFFER_S];  // RX buffer for receiving data
 
-// Pins for controlling H-Bridge
-gpio_num_t IN1_pin = GPIO_NUM_27;                  // Pin for IN1 of H-Bridge
-gpio_num_t IN2_pin = GPIO_NUM_33;                  // Pin for IN2 of H-Bridge
-gpio_num_t EN_pin = GPIO_NUM_32;                   // Pin for Enable signal of H-Bridge
-gpio_num_t CURRENT_MONITOR_PIN_MAIN = GPIO_NUM_36; // Pin for current mesure
-gpio_num_t FEEDBACK_PIN = GPIO_NUM_26;             // Output of the feedback comparator (MCP6541)
-gpio_num_t CAN_RX_pin = GPIO_NUM_4;                // CAN bus of the Box (transceiver RX)
-gpio_num_t CAN_TX_pin = GPIO_NUM_5;                // CAN bus of the Box (transceiver TX)
+// Pins of the board: src/Board.h (prototype by default, proto 2 with the
+// environment proto2 of platformio.ini)
+gpio_num_t IN1_pin = IN1_PIN;                      // Pin for IN1 of H-Bridge
+gpio_num_t IN2_pin = IN2_PIN;                      // Pin for IN2 of H-Bridge
+gpio_num_t EN_pin = EN_PIN;                        // Pin for Enable signal of H-Bridge
+gpio_num_t CURRENT_MONITOR_PIN_MAIN = CURRENT_PIN; // Pin for current mesure
+gpio_num_t FEEDBACK_PIN = FEEDBACK_PIN_BOARD;      // Output of the feedback comparator (MCP6541)
+gpio_num_t CAN_RX_pin = CAN_RX_PIN;                // CAN bus of the Box (transceiver RX)
+gpio_num_t CAN_TX_pin = CAN_TX_PIN;                // CAN bus of the Box (transceiver TX)
 // Note: with ETHERNET, Ethernet.init(5) below takes GPIO 5 too (chip select):
 // move one of them before using both.
 
@@ -199,6 +202,7 @@ void setup()
   Serial.printf("\nAuteur    :    %s", AUTHOR);
   Serial.printf("\nFichier   :    %s", __FILE__);
   Serial.printf("\nCompiled  :    %s", BUILD_DATE);
+  Serial.printf("\nBoard     :    %s", BOARD_NAME);
   Serial.printf("\nCore      :    Arduino %d.%d.%d, ESP-IDF %s\n\n", ESP_ARDUINO_VERSION_MAJOR, ESP_ARDUINO_VERSION_MINOR,
                 ESP_ARDUINO_VERSION_PATCH, esp_get_idf_version());
 
@@ -234,6 +238,8 @@ void setup()
 
   // Centrale first: Message::centrale() broadcasts its UID and counter
   Centrale::setup(idCentrale, EN_pin);
+  // Hardware overcurrent protection of the board proto 2 (nothing on the prototype)
+  Centrale::setupProtection(TRK_RST_PIN, FAULT_PIN);
   //Centrale::setCounter(Centrale::counter() + 1); // PROVISOIRE : force la réinscription
   Serial.printf("MFX re-registration counter : %u\n", Centrale::counter());
 
@@ -262,11 +268,12 @@ void setup()
   // The configuration read in the decoders is printed in any case.
   Feedback::setTrace(false, false);
   //Feedback::setTrace(true, true);
-  // Trigger for an oscilloscope on GPIO 25 (free pin): high during the
+  // Trigger for an oscilloscope on SCOPE_PIN (Board.h: GPIO 25 on the
+  // prototype, 16 on the proto 2): high during the
   // windows of the 1-bit feedback (ONE_BIT), during the answer to a read
   // CV (DATA), or both (BOTH). SCOPE_OFF: pin not used.
   // Third parameter: only the reads of this address (0: every address).
-  Feedback::setScope(GPIO_NUM_25, Feedback::SCOPE_OFF);
+  Feedback::setScope(SCOPE_PIN, Feedback::SCOPE_OFF);
 
   // DCC and MM locomotives of the refresh, kept in the NVS, before the signal task
   DccLocos::setup();
@@ -274,6 +281,12 @@ void setup()
 
   // Initialize RMTChannel
   RMTChannel::setup(IN1_pin, IN2_pin);
+
+  // RailCom cutout after each DCC packet (board proto 2 only: CUTOUT_GATE).
+  // Off by default: the DCC signal stays the one of the Gleisbox, which has
+  // no cutout. setEnabled(true) here, or serial command W, to switch it on.
+  RailCom::setup(CUTOUT_PIN, IN1_pin);
+  RailCom::setEnabled(false);
 
   // Automatic discovery of the decoders not yet registered
   Discovery::setup();

@@ -39,8 +39,16 @@ void currentMonitorTask(void *p)
     monitor->m_current = mA * CURRENT_SAMPLE_SMOOTHING +
                          monitor->m_current * (1.0f - CURRENT_SAMPLE_SMOOTHING);
 
+    // Protection matérielle (carte proto 2) : elle a déjà coupé ENABLE ;
+    // la voie passe en surcharge, comme pour la mesure ci-dessous
+    if (powered && Centrale::protectionTripped())
+    {
+      Centrale::setOverload();
+      Serial.printf("Surintensite : protection materielle (FAULT, > 4,1 A), voie coupee jusqu'au prochain Go\n");
+      monitor->m_current = 0;
+    }
     // Vérification si le courant dépasse la limite
-    if (powered && monitor->m_current > MAX_CURRENT_MA)
+    else if (powered && monitor->m_current > MAX_CURRENT_MA)
     {
       Centrale::setOverload();
       Serial.printf("Surcharge : %ld mA, voie coupee jusqu'au prochain Go\n",

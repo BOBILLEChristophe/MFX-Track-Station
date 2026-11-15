@@ -44,6 +44,26 @@ La Box de Locoduino convient parfaitement et apporte une base matérielle compl�
 
 Voir sur YouTube : https://youtu.be/kIXx-TSOVpQ?si=jwideeNshVRPlX4l
 
+#### Carte proto 2 (KiCad, novembre 2026)
+
+Les broches de la carte sont dans `src/Board.h`. L'environnement par défaut (`esp32dev`) garde celles du prototype actuel ; l'environnement `proto2` prend celles de la carte proto 2 : `pio run -e proto2 -t upload`.
+
+| Fonction | GPIO | Remarque |
+|---|---|---|
+| IN1 / IN2 du L6203 | 19 / 18 | par les portes ET du SN74HCT08N |
+| ENABLE du L6203 | 13 | par R43, forcé à 0 par la protection matérielle |
+| Mesure du courant | 36 | shunt 0,25 Ω, R7 + C46 ; 575 mV/A et seuil 3 A à étalonner |
+| Retour mfx (comparateur) | 32 | |
+| Bus CAN RX / TX | 4 / 5 | |
+| Coupure RailCom (CUTOUT_GATE) | 14 | 0 = les deux demi-ponts à la masse |
+| Réarmement de la protection (TRK_RST) | 23 | CLR de la bascule 74HC74 |
+| Défaut de surintensité (FAULT) | 39 | 1 = bascule verrouillée |
+| Oscilloscope | 16 | (25 est le PS du S88 sur cette carte) |
+
+**Protection matérielle** : au-delà de 4,1 A, le LM393 verrouille la bascule, qui met ENABLE à 0 en quelques µs sans le logiciel. La centrale lit FAULT toutes les ms et passe la voie en surcharge, comme pour la mesure logicielle : la voie reste coupée jusqu'au prochain Go, qui remet la bascule à zéro (impulsion basse sur TRK_RST) puis l'arme. Commande série `P` : état de la protection.
+
+**Coupure RailCom** (RCN-217, `src/RailCom.h`) : après chaque paquet DCC, les deux demi-ponts passent à la masse de 29 à 470 µs après la fin du bit de fin, pour que les décodeurs puissent répondre. Le signal laisse la place (le préambule perd 4 bits), et la coupure est calée sur le front réel du bit de fin (interruption sur IN1) et un temporisateur matériel. Désactivée par défaut : le DCC reste celui de la Gleisbox. Commande série `W` pour l'activer, `U<µs>` pour régler la compensation des latences. **À vérifier à l'oscilloscope** sur la carte : la coupure doit commencer 26 à 32 µs après le dernier front du paquet.
+
 ### Retour d'information
 
 Un capteur sur un fil de voie permet aux décodeurs de répondre à la centrale. Il sert à l'**inscription des décodeurs**, reproduite d'après des relevés d'une MS2 et d'une Gleisbox Märklin au renifleur (voie et bus CAN). Comme dans le couple MS2 + Gleisbox, les rôles sont partagés : **la centrale fait le travail de la Gleisbox, et Rocrail celui de la MS2** (le maître, qui choisit les adresses et tient la liste des locomotives).

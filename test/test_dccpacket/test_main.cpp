@@ -200,6 +200,62 @@ void test_encode_series()
     TEST_ASSERT_EQUAL_UINT16(Dcc::ONE_US, halves[nHalves - 6]);
 }
 
+// RailCom: a hold of the track after each end bit, at its place in the
+// chunk; the packets are the same, the preamble 4 bits shorter
+void test_encode_railcom()
+{
+    const Dcc::Packet p[2] = {Dcc::speed(3, false, Dcc::STEPS_28, true, 0, false),
+                              Dcc::functions(8, false, Dcc::F0_F4, 1)};
+    static MfxSignal s;
+    bool level = false;
+    nHalves = 0;
+    uint8_t holds = 0;
+    for (uint8_t k = 0; k < 2; k++)
+    {
+        s.clear();
+        Dcc::encode(s, p[k], k == 0, k < 1, true);
+        TEST_ASSERT_TRUE(s.cutoutUs() > 0);
+        // The item that starts at cutoutUs() is the hold, at cutoutLevel()
+        uint32_t t = 0;
+        uint16_t i = 0;
+        while (i < s.count() && t < s.cutoutUs())
+        {
+            t += s.item(i).duration0 + s.item(i).duration1;
+            i++;
+        }
+        TEST_ASSERT_EQUAL_UINT32(s.cutoutUs(), t);
+        const MfxItem &h = s.item(i);
+        TEST_ASSERT_EQUAL_UINT16(Dcc::RAILCOM_HOLD_US, h.duration0 + h.duration1);
+        TEST_ASSERT_EQUAL(s.cutoutLevel(), h.level0);
+        // Before it, the end bit: two halves of 58 µs
+        TEST_ASSERT_EQUAL_UINT16(Dcc::ONE_US, s.item(i - 1).duration0 + s.item(i - 1).duration1);
+        TEST_ASSERT_EQUAL_UINT16(Dcc::ONE_US, s.item(i - 2).duration0 + s.item(i - 2).duration1);
+        collect(s, &level);
+    }
+    // Without the holds, the packets and their preambles
+    uint16_t j = 0;
+    for (uint16_t i = 0; i < nHalves; i++)
+    {
+        if (halves[i] == Dcc::RAILCOM_HOLD_US)
+            holds++;
+        else
+            halves[j++] = halves[i];
+    }
+    nHalves = j;
+    TEST_ASSERT_EQUAL_UINT8(2, holds);
+    Dcc::Packet got[3];
+    uint8_t pre[3];
+    TEST_ASSERT_EQUAL_UINT8(2, decode(got, 3, pre));
+    for (uint8_t k = 0; k < 2; k++)
+        TEST_ASSERT_EQUAL_UINT8_ARRAY(p[k].b, got[k].b, p[k].n);
+    TEST_ASSERT_EQUAL_UINT8(21, pre[0]);
+    TEST_ASSERT_EQUAL_UINT8(Dcc::RAILCOM_PREAMBLE_BITS + 1, pre[1]); // + the end bit
+    // Without RailCom, no cutout marked
+    s.clear();
+    Dcc::encode(s, p[0], true, false);
+    TEST_ASSERT_EQUAL_UINT32(0, s.cutoutUs());
+}
+
 int main(int, char **)
 {
     UNITY_BEGIN();
@@ -210,5 +266,6 @@ int main(int, char **)
     RUN_TEST(test_accessory);
     RUN_TEST(test_steps_from_cs2);
     RUN_TEST(test_encode_series);
+    RUN_TEST(test_encode_railcom);
     return UNITY_END();
 }

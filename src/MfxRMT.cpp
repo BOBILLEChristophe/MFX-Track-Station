@@ -46,6 +46,7 @@
 #include "MmLocos.h"
 #include "MmPacket.h"
 #include "Accessories.h"
+#include "RailCom.h"
 #include "esp_timer.h"
 #include "esp_rom_gpio.h" // esp_rom_gpio_pad_select_gpio, esp_rom_gpio_connect_out_signal
 #include "driver/gpio.h"
@@ -184,8 +185,11 @@ void RMTChannel::signalTask(void *parameter)
             for (uint8_t i = 0; i < nd; i++)
             {
                 signal.clear();
-                Dcc::encode(signal, dcc[i], i == 0, i + 1 < nd);
+                // RailCom: room for the cutout after the end bit, and the
+                // cutout itself armed once the chunk has started
+                Dcc::encode(signal, dcc[i], i == 0, i + 1 < nd, RailCom::enabled());
                 const int64_t start = send(signal);
+                RailCom::arm(start, signal.cutoutUs(), signal.cutoutLevel());
                 roundEnd = start + signal.durationUs();
             }
             for (uint8_t i = 0; i < nm; i++)
