@@ -38,7 +38,7 @@ namespace RailCom
     static void IRAM_ATTR skip()
     {
         sPending = false;
-        sSkipped++;
+        sSkipped = sSkipped + 1;
         gpio_ll_intr_disable(&GPIO, sIn1);
     }
 
@@ -90,7 +90,7 @@ namespace RailCom
         else
         {
             gpio_ll_set_level(&GPIO, sGate, 1);
-            sDone++;
+            sDone = sDone + 1;
             gptimer_set_alarm_action(timer, NULL); // no more alarm
         }
         return false;
@@ -173,15 +173,15 @@ namespace RailCom
         {
             if (now <= sCloseUs)
             {
-                sSkipped++; // the previous one is still waiting for its edge
+                sSkipped = sSkipped + 1; // the previous one is still waiting for its edge
                 return;
             }
             sPending = false; // its window is over without an edge: forgotten
-            sSkipped++;
+            sSkipped = sSkipped + 1;
         }
         if (now > edge - WINDOW_BEFORE_US / 2)
         {
-            sSkipped++; // too late already
+            sSkipped = sSkipped + 1; // too late already
             return;
         }
         sLevel = levelAfter;
