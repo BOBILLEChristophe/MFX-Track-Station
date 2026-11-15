@@ -145,7 +145,7 @@ namespace Dcc
         s.half(us);
     }
 
-    void encode(MfxSignal &s, const Packet &p, bool lead, bool more)
+    void encode(MfxSignal &s, const Packet &p, bool lead, bool more, bool railcom)
     {
         if (lead)
         {
@@ -160,9 +160,15 @@ namespace Dcc
                 bit(s, (p.b[i] >> k) & 1);
             bit(s, i + 1 == p.n); // separator 0, or the end bit 1
         }
+        if (railcom)
+        {
+            // The edge after the end bit, then the track still during the cutout
+            s.markCutout(!s.level());
+            s.half(RAILCOM_HOLD_US);
+        }
         if (more)
         {
-            for (uint8_t i = 0; i < PREAMBLE_BITS; i++)
+            for (uint8_t i = 0; i < (railcom ? RAILCOM_PREAMBLE_BITS : PREAMBLE_BITS); i++)
                 bit(s, true);
             s.half(ZERO_US); // the stretch between the chunks falls here
         }

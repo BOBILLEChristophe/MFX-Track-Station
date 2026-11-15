@@ -18,6 +18,8 @@ private:
     static uint32_t m_uid;
     static uint16_t m_counter;
     static gpio_num_t EN_pin;
+    static gpio_num_t RST_pin;   // TRK_RST: CLR of the protection latch (GPIO_NUM_NC: none)
+    static gpio_num_t FAULT_pin; // FAULT: Q of the latch
     static volatile bool m_power;
     static volatile bool m_overload;
     static volatile uint32_t m_powerOnMs;
@@ -44,4 +46,17 @@ public:
     static uint32_t poweredForMs();
     static void setOverload(); // coupe la voie et mémorise la surcharge
     static bool overload();
+
+    /*
+     Protection matérielle de la carte proto 2 (LM393 + bascule 74HC74) :
+     au-delà de 4,1 A, la bascule se verrouille (FAULT = 1) et met ENABLE du
+     L6203 à 0 par D7, en quelques µs, sans le logiciel. TRK_RST (CLR de la
+     bascule) à 0 la remet à zéro et la tient inactive ; à 1, elle est armée.
+     setPower(true) la remet à zéro (impulsion basse) puis l'arme, avant ENABLE.
+     protectionTripped() : FAULT lu, la surveillance du courant en fait une
+     surcharge (voie coupée jusqu'au prochain Go, comme la mesure logicielle).
+    */
+    static void setupProtection(gpio_num_t rst, gpio_num_t fault);
+    static bool hasProtection();
+    static bool protectionTripped();
 };

@@ -44,6 +44,26 @@ The Box from Locoduino fits perfectly and gives a complete and proven hardware b
 
 Watch on YouTube: https://youtu.be/kIXx-TSOVpQ?si=jwideeNshVRPlX4l
 
+#### Board proto 2 (KiCad, November 2026)
+
+The pins of the board are in `src/Board.h`. The default environment (`esp32dev`) keeps those of the current prototype; the environment `proto2` takes those of the board proto 2: `pio run -e proto2 -t upload`.
+
+| Function | GPIO | Note |
+|---|---|---|
+| IN1 / IN2 of the L6203 | 19 / 18 | through the AND gates of the SN74HCT08N |
+| ENABLE of the L6203 | 13 | through R43, forced to 0 by the hardware protection |
+| Current measurement | 36 | shunt 0.25 Ω, R7 + C46; 575 mV/A and threshold 3 A, to be calibrated |
+| mfx feedback (comparator) | 32 | |
+| CAN bus RX / TX | 4 / 5 | |
+| RailCom cutout (CUTOUT_GATE) | 14 | 0 = both half-bridges to ground |
+| Re-arming of the protection (TRK_RST) | 23 | CLR of the 74HC74 latch |
+| Overcurrent fault (FAULT) | 39 | 1 = latch set |
+| Oscilloscope | 16 | (25 is the S88 PS on this board) |
+
+**Hardware protection**: above 4.1 A, the LM393 sets the latch, which pulls ENABLE to 0 within a few µs, without the software. The command station reads FAULT every ms and puts the track in overload, as for the software measurement: the track stays off until the next Go, which clears the latch (low pulse on TRK_RST) then arms it. Serial command `P`: state of the protection.
+
+**RailCom cutout** (RCN-217, `src/RailCom.h`): after each DCC packet, both half-bridges go to ground from 29 to 470 µs after the end of the end bit, so that the decoders can answer. The signal leaves room for it (the preamble loses 4 bits), and the cutout is timed on the real edge of the end bit (interrupt on IN1) and a hardware timer. Off by default: the DCC stays the one of the Gleisbox. Serial command `W` to switch it on, `U<µs>` to set the compensation of the latencies. **To be checked with an oscilloscope** on the board: the cutout must start 26 to 32 µs after the last edge of the packet.
+
 ### Feedback
 
 A sensor on one track wire lets the decoders answer the command station. It is used for the **registration of the decoders**, reproduced from recordings of a Märklin MS2 and Gleisbox with a sniffer (track and CAN bus). As with an MS2 and a Gleisbox, the work is shared: **the command station does the work of the Gleisbox, and Rocrail the work of the MS2** (the master, which chooses the addresses and keeps the list of the locomotives).

@@ -42,6 +42,20 @@ namespace Dcc
 
     static const uint8_t MAX_BYTES = 6;
 
+    // RailCom cutout (RCN-217), when asked to encode(): the track is cut
+    // (both outputs of the H-bridge low, CUTOUT_GATE of the board) from
+    // RAILCOM_START_US to RAILCOM_END_US after the end of the end bit
+    // (standard: 26-32 µs and 454-488 µs). The signal does not toggle under
+    // the cutout: after the edge that ends the end bit, the track keeps its
+    // level RAILCOM_HOLD_US (RAILCOM_END_US + a part of a half-bit), then the
+    // preamble goes on with RAILCOM_PREAMBLE_BITS ones (4 bits are taken by
+    // the hold). The cutout itself is driven by MfxRMT (edge of the end bit,
+    // timer); here only the room for it.
+    static const uint16_t RAILCOM_START_US = 29;
+    static const uint16_t RAILCOM_END_US = 470;
+    static const uint16_t RAILCOM_HOLD_US = RAILCOM_END_US + 29;
+    static const uint8_t RAILCOM_PREAMBLE_BITS = PREAMBLE_BITS - 4;
+
     struct Packet
     {
         uint8_t n;             // bytes, error byte included
@@ -94,5 +108,8 @@ namespace Dcc
     // in an open start bit (the preamble is sent here). more: another packet
     // follows in the next chunk (its preamble and the first half of its start
     // bit end this chunk), else the tail bits end it.
-    void encode(MfxSignal &signal, const Packet &p, bool lead, bool more);
+    // railcom: room for a RailCom cutout after the end bit (see above), and
+    // its place marked in the signal (MfxSignal::cutoutUs()). Without it,
+    // the signal is the one recorded on the Gleisbox.
+    void encode(MfxSignal &signal, const Packet &p, bool lead, bool more, bool railcom = false);
 }

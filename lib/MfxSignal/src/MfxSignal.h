@@ -123,14 +123,28 @@ public:
                                       5 * FEEDBACK_SYNCS + 4 + 1 + DATA_LEAD_CLOCKS +
                                       2 * (3 + 8 * DATA_MAX_BYTES + 8 + 4) + 1 + 5 * DATA_END_SYNCS + 1;
 
-    MfxSignal() : mCount(0), mLevel(false), mOverflow(false) {}
+    MfxSignal() : mCount(0), mLevel(false), mOverflow(false), mCutoutUs(0), mCutoutLevel(false) {}
 
     // Empties the item list. The track level is kept.
     void clear()
     {
         mCount = 0;
         mOverflow = false;
+        mCutoutUs = 0;
     }
+
+    // RailCom cutout (DCC, RCN-217): marks the end of the end bit of a
+    // packet, i.e. the edge after which the cutout starts. markCutout() is
+    // called right before that edge is added (DccPacket encode()), with the
+    // level the track takes on this edge. cutoutUs(): time of that edge
+    // from the start of the chunk, 0 when there is none.
+    void markCutout(bool levelAfter)
+    {
+        mCutoutUs = durationUs();
+        mCutoutLevel = levelAfter;
+    }
+    uint32_t cutoutUs() const { return mCutoutUs; }
+    bool cutoutLevel() const { return mCutoutLevel; }
 
     // Level of the track at the end of the last item.
     bool level() const { return mLevel; }
@@ -199,4 +213,6 @@ private:
     uint16_t mCount;
     bool mLevel;
     bool mOverflow;
+    uint32_t mCutoutUs;
+    bool mCutoutLevel;
 };

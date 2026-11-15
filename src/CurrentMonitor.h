@@ -10,6 +10,7 @@ CurrentMonitor.h
 
 #include "Arduino.h"
 #include "Centrale.h"
+#include "Board.h"
 
 #define CURRENT_SAMPLE_SMOOTHING 0.01f
 
@@ -21,10 +22,18 @@ CurrentMonitor.h
  1000 mV par A correspond au commentaire d'origine (1000 mV -> 1 A).
  A VERIFIER sur le schéma de votre carte (La Box) avant de se fier au seuil.
 */
+#if defined(BOARD_CURRENT_MV_PER_A)
+#define CURRENT_MV_PER_A BOARD_CURRENT_MV_PER_A
+#else
 #define CURRENT_MV_PER_A 1000
+#endif
 
 // Seuil de coupure, en mA. La limite est ici fixée à 1 A.
+#if defined(BOARD_MAX_CURRENT_MA)
+#define MAX_CURRENT_MA BOARD_MAX_CURRENT_MA
+#else
 #define MAX_CURRENT_MA 1000
+#endif
 
 #define CURRENT_SAMPLE_TIME 1 // ms
 

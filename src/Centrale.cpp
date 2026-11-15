@@ -7,10 +7,13 @@
 
 #include "Centrale.h"
 #include <Preferences.h>
+#include "rom/ets_sys.h" // ets_delay_us
 
 uint32_t Centrale::m_uid = 0;
 uint16_t Centrale::m_counter = Centrale::DEFAULT_MFX_COUNTER;
 gpio_num_t Centrale::EN_pin = GPIO_NUM_0;
+gpio_num_t Centrale::RST_pin = GPIO_NUM_NC;
+gpio_num_t Centrale::FAULT_pin = GPIO_NUM_NC;
 volatile bool Centrale::m_power = false;
 volatile uint32_t Centrale::m_powerOnMs = 0;
 volatile bool Centrale::m_overload = false;
@@ -54,7 +57,12 @@ void Centrale::setup(uint32_t uid, gpio_num_t EN)
         prefs.end();
     }
 
-    gpio_set_direction(EN_pin, GPIO_MODE_OUTPUT);
+    // gpio_config: also selects the GPIO function of the pad (GPIO 13 of the
+    // board proto 2 is a JTAG pin at reset)
+    gpio_config_t io = {};
+    io.pin_bit_mask = 1ULL << EN_pin;
+    io.mode = GPIO_MODE_OUTPUT;
+    gpio_config(&io);
     gpio_set_level(EN_pin, LOW);
 }
 
@@ -70,6 +78,13 @@ void Centrale::setPower(bool power)
         m_overload = false;
     if (power && !wasOn)
         m_powerOnMs = millis();
+    if (power && RST_pin != GPIO_NUM_NC)
+    {
+        // Latch of the hardware protection cleared (pulse on CLR), then armed
+        gpio_set_level(RST_pin, LOW);
+        ets_delay_us(2);
+        gpio_set_level(RST_pin, HIGH);
+    }
     gpio_set_level(EN_pin, power ? HIGH : LOW);
     portEXIT_CRITICAL(&m_mux);
     Serial.printf("power %s\n", power ? "on" : "off");
@@ -103,4 +118,37 @@ void Centrale::setOverload()
 bool Centrale::overload()
 {
     return m_overload;
+}
+
+void Centrale::setupProtection(gpio_num_t rst, gpio_num_t fault)
+{
+    RST_pin = rst;
+    FAULT_pin = fault;
+    if (RST_pin != GPIO_NUM_NC)
+    {
+        // Latch held cleared until the first Go (R46 pulls it low as well)
+        gpio_config_t io = {};
+        io.pin_bit_mask = 1ULL << RST_pin;
+        io.mode = GPIO_MODE_OUTPUT;
+        gpio_config(&io);
+        gpio_set_level(RST_pin, LOW);
+    }
+    if (FAULT_pin != GPIO_NUM_NC)
+    {
+        // GPIO 39: input only, no pull-up, driven by the 74HC74
+        gpio_config_t io = {};
+        io.pin_bit_mask = 1ULL << FAULT_pin;
+        io.mode = GPIO_MODE_INPUT;
+        gpio_config(&io);
+    }
+}
+
+bool Centrale::hasProtection()
+{
+    return RST_pin != GPIO_NUM_NC && FAULT_pin != GPIO_NUM_NC;
+}
+
+bool Centrale::protectionTripped()
+{
+    return FAULT_pin != GPIO_NUM_NC && gpio_get_level(FAULT_pin) == 1;
 }

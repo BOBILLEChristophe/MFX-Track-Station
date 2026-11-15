@@ -13,6 +13,8 @@
 #include "MfxConfig.h"
 #include "Cs2Config.h"
 #include "LocoStore.h"
+#include "RailCom.h"
+#include "DccPacket.h"
 #include "DccLocos.h"
 #include "MmLocos.h"
 #include "MfxSignal.h"
@@ -1166,6 +1168,49 @@ static void console()
                 Serial.printf("\nFlip before the answer window: %s %u µs\n", us ? "after" : "none", us);
             }
         }
+        else if (c == 'W')
+        {
+            // RailCom cutout after the DCC packets (board proto 2): on/off
+            if (!RailCom::available())
+                Serial.println("\nRailCom: no CUTOUT_GATE on this board");
+            else
+            {
+                RailCom::setEnabled(!RailCom::enabled());
+                Serial.printf("\nRailCom cutout: %s (%lu made, %lu skipped so far, latency %u us)\n",
+                              RailCom::enabled() ? "on" : "off", (unsigned long)RailCom::done(),
+                              (unsigned long)RailCom::skipped(), RailCom::latencyUs);
+            }
+        }
+        else if (c == 'U')
+        {
+            // U<us>: latency of the interrupts taken off the times of the cutout (3 by default)
+            vTaskDelay(pdMS_TO_TICKS(50));
+            uint16_t us = 0;
+            bool digits = false;
+            while (Serial.available() > 0 && isdigit(Serial.peek()))
+            {
+                us = us * 10 + (Serial.read() - '0');
+                digits = true;
+            }
+            if (!digits || us > 20)
+                Serial.printf("\nU: U followed by the latency in us, 0 to 20 (U3 = default), now %u\n", RailCom::latencyUs);
+            else
+            {
+                RailCom::latencyUs = us;
+                Serial.printf("\nRailCom: latency %u us (cutout from %u to %u us after the end bit, before it)\n", us,
+                              Dcc::RAILCOM_START_US, Dcc::RAILCOM_END_US);
+            }
+        }
+        else if (c == 'P')
+        {
+            // Hardware protection of the board proto 2
+            if (!Centrale::hasProtection())
+                Serial.println("\nHardware protection: none on this board");
+            else
+                Serial.printf("\nHardware protection: FAULT = %d (%s), track %s%s\n", Centrale::protectionTripped() ? 1 : 0,
+                              Centrale::protectionTripped() ? "overcurrent latched" : "no fault",
+                              Centrale::power() ? "on" : "off", Centrale::overload() ? ", overload" : "");
+        }
         else if (c == '?')
             Serial.printf("\nCommands: R = re-registration of every decoder (counter %u -> %u, restart), "
                           "V = verify every declared locomotive, L = list the locomotives (mfx, DCC, MM), G = polarity of the MM pulses (test), C = read the configurations again (C404: one locomotive), "
@@ -1173,7 +1218,7 @@ static void console()
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
                           "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "
                           "T<UID>[,1] = test bench, search questions for every count (,1: other bits at 1), "
-                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I10 default), B<addr>,<new> = move a locomotive to another address (test), Q = stop/restart the refresh of the locomotives (test), X<addr>[,rounds,per] = scenario: verifies with the refresh on and off in turn, Y<addr>[,rounds,per] = the same without and with the pause after the frames, H = pause after the frames (on/off), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I10 default), B<addr>,<new> = move a locomotive to another address (test), Q = stop/restart the refresh of the locomotives (test), X<addr>[,rounds,per] = scenario: verifies with the refresh on and off in turn, Y<addr>[,rounds,per] = the same without and with the pause after the frames, H = pause after the frames (on/off), W = RailCom cutout (on/off, board proto 2), U<us> = latency of the cutout (U3 default), P = state of the hardware protection (board proto 2), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }
