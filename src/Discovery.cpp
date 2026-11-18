@@ -14,6 +14,7 @@
 #include "Cs2Config.h"
 #include "LocoStore.h"
 #include "RailCom.h"
+#include "LinkS88.h"
 #include "DccPacket.h"
 #include "DccLocos.h"
 #include "MmLocos.h"
@@ -393,6 +394,8 @@ static void sendBind(Loco *l, bool verify = true)
    E : erase the locomotives in memory (LocoStore); the counter is raised
        and the command station restarts, so that every decoder registers
        again.
+   K : Link S88 (L88): state; K1,0,1[,10] = number of S88 modules on its
+       buses 1, 2 (RJ45) and 3 (6 pins), and cycle time in ms (LinkS88.h).
    ? : this help.
 */
 static void verifyAll()
@@ -1211,6 +1214,41 @@ static void console()
                               Centrale::protectionTripped() ? "overcurrent latched" : "no fault",
                               Centrale::power() ? "on" : "off", Centrale::overload() ? ", overload" : "");
         }
+        else if (c == 'K')
+        {
+            // Link S88 (L88): K = state; K<b1>,<b2>,<b3>[,<ms>] = number of
+            // S88 modules on the buses 1, 2 (RJ45), 3 (6 pins) and cycle time
+            // (K1,0,1 or K1,0,1,10), kept in the NVS
+            vTaskDelay(pdMS_TO_TICKS(50));
+            uint16_t v[4] = {0, 0, 0, 100};
+            uint8_t n = 0;
+            bool digits = false;
+            while (Serial.available() > 0 && n < 4)
+            {
+                const int ch = Serial.peek();
+                if (isdigit(ch))
+                {
+                    v[n] = (uint16_t)((digits ? v[n] * 10 : 0) + (Serial.read() - '0'));
+                    digits = true;
+                }
+                else if (ch == ',' && digits)
+                {
+                    Serial.read();
+                    n++;
+                    digits = false;
+                }
+                else
+                    break;
+            }
+            if (digits)
+                n++;
+            if (n >= 3)
+                LinkS88::configure((uint8_t)min(v[0], (uint16_t)255), (uint8_t)min(v[1], (uint16_t)255),
+                                   (uint8_t)min(v[2], (uint16_t)255), v[3]);
+            else if (n > 0)
+                Serial.println("\nK: K<bus 1>,<bus 2>,<bus 3>[,<cycle ms>], e.g. K1,0,1 or K1,0,1,10");
+            LinkS88::printStatus();
+        }
         else if (c == '?')
             Serial.printf("\nCommands: R = re-registration of every decoder (counter %u -> %u, restart), "
                           "V = verify every declared locomotive, L = list the locomotives (mfx, DCC, MM), G = polarity of the MM pulses (test), C = read the configurations again (C404: one locomotive), "
@@ -1218,7 +1256,7 @@ static void console()
                           "N<address>[,n] = test bench, n reads of the name (N404,10), "
                           "S<UID>[,n[,pause]] = test bench, n search questions with the whole UID, pause in ms after each (SF9E610E0,50,150), "
                           "T<UID>[,1] = test bench, search questions for every count (,1: other bits at 1), "
-                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I10 default), B<addr>,<new> = move a locomotive to another address (test), Q = stop/restart the refresh of the locomotives (test), X<addr>[,rounds,per] = scenario: verifies with the refresh on and off in turn, Y<addr>[,rounds,per] = the same without and with the pause after the frames, H = pause after the frames (on/off), W = RailCom cutout (on/off, board proto 2), U<us> = latency of the cutout (U3 default), P = state of the hardware protection (board proto 2), E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
+                          "F<us> = flip before the answer window (F2 default, F0 none), A = pulse after 0011 when already at the window level, as the Gleisbox (on/off), I<us> = length of this pulse (I10 default), B<addr>,<new> = move a locomotive to another address (test), Q = stop/restart the refresh of the locomotives (test), X<addr>[,rounds,per] = scenario: verifies with the refresh on and off in turn, Y<addr>[,rounds,per] = the same without and with the pause after the frames, H = pause after the frames (on/off), W = RailCom cutout (on/off, board proto 2), U<us> = latency of the cutout (U3 default), P = state of the hardware protection (board proto 2), K[b1,b2,b3[,ms]] = Link S88: number of S88 modules on its buses 1, 2, 3 and cycle time (K1,0,1,10), K alone = state, E = erase the locomotives in memory (counter + 1, restart), ? = help\n",
                           Centrale::counter(), Centrale::counter() + 1);
     }
 }
