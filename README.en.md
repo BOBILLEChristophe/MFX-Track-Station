@@ -64,7 +64,15 @@ The pins of the board are in `src/Board.h`. The default environment (`esp32dev`)
 
 **RailCom cutout** (RCN-217, `src/RailCom.h`): after each DCC packet, both half-bridges go to ground from 29 to 470 µs after the end of the end bit, so that the decoders can answer. The signal leaves room for it (the preamble loses 4 bits), and the cutout is timed on the real edge of the end bit (interrupt on IN1) and a hardware timer. Off by default: the DCC stays the one of the Gleisbox. Serial command `W` to switch it on, `U<µs>` to set the compensation of the latencies. **To be checked with an oscilloscope** on the board: the cutout must start 26 to 32 µs after the last edge of the packet.
 
-**Link S88 (L88, 60883)** (`src/LinkS88.h`), on the mini-DIN 7 socket (J9: CAN and ground; the L88 has its own power supply, and the ground of its first S88 module goes to the rail 0): without a CS2/CS3 the L88 waits for a master. The command station wakes it up and configures it as `wake-up-links88` of Gerd Bertelsmann does: search every 10 s (bootloader query and ping), wake-up sequence, then number of S88 modules of its buses 1 and 2 (RJ45) and 3 (6 pins) and cycle time. An L88 switched off and on is woken up again. Its contacts come as S88 events (command 0x11), passed to Rocrail like every frame of the bus. Serial command `K1,0,1,10`: 1 module on bus 1, none on bus 2, 1 on bus 3, cycle 10 ms (kept in the NVS); `K` alone: state. **To be tried with an L88.**
+**Link S88 (L88, 60883)** (`src/LinkS88.h`), on the mini-DIN 7 socket (J9: CAN and ground; the L88 has its own power supply, and the ground of its first S88 module goes to the rail 0): without a CS2/CS3 the L88 waits for a master. The command station wakes it up and configures it as `wake-up-links88` of Gerd Bertelsmann does: search every 10 s (bootloader query and ping), wake-up sequence, then number of S88 modules of its buses 1 and 2 (RJ45) and 3 (6 pins) and cycle time. An L88 switched off and on is woken up again. Its contacts come as S88 events (command 0x11), passed to Rocrail like every frame of the bus. Serial command `K1,0,1,10`: 1 module on bus 1, none on bus 2, 1 on bus 3, cycle 10 ms; `K` alone: state. The same on the web page. Kept in `/config/l88.json`. **To be tried with an L88.**
+
+### Settings in a web browser
+
+The command station serves a settings page on **http://192.168.1.210/** (port 80, the same WiFi as Rocrail; `src/WebUi.h`). The page is in the program (`src/WebPage.h`) and uses a small JSON API (`/api/l88`, `/api/files`, `/api/config?name=`). It calls the same functions as the serial console. First subject: the Link S88; RailCom, protection, current and locomotives will follow on the same model.
+
+The settings are saved in **LittleFS**, one JSON file per subject in `/config` (`src/ConfigStore.h`): written to a temporary file then renamed, a version number in each file. The page lists the files and lets you download them (backup). What the NVS already held (locomotives, mfx counter) stays there.
+
+**Partition table** (`partitions.csv`): two program slots of 1.56 MB and 768 KB of LittleFS, instead of the 1.25 MB of the default table (program already at 81 %). The NVS keeps its place, so its content. **The first upload after this change must be done over USB**; LittleFS is formatted at the first start.
 
 ### Feedback
 

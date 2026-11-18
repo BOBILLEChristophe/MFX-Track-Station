@@ -38,6 +38,8 @@
 #include "Board.h"
 #include "RailCom.h"
 #include "LinkS88.h"
+#include "ConfigStore.h"
+#include "WebUi.h"
 
 // Central system ID used for identification
 const uint32_t idCentrale = 0x476bb7dc;
@@ -295,8 +297,12 @@ void setup()
   // CAN bus of the Box (an MS2 can be connected): RX GPIO 4, TX GPIO 5
   CanBus::setup(CAN_RX_pin, CAN_TX_pin);
 
+  // Configuration files in LittleFS (/config/*.json)
+  ConfigStore::setup();
+
   // Link S88 (L88, 60883) on the bus: woken up and configured by the command
-  // station, as a CS2/CS3 does (number of S88 modules: serial command K)
+  // station, as a CS2/CS3 does (number of S88 modules: serial command K or
+  // web page, /config/l88.json)
   LinkS88::setup();
 
   xTaskCreatePinnedToCore(currentMonitorTask, "CurrentMonitorTask", 4 * 1024, &mainMonitor, 9, NULL, 0);
@@ -331,6 +337,9 @@ void setup()
   Serial.println(WiFi.localIP());
   Serial.printf("Port = %d\n", port);
   server.begin();
+
+  // Settings from a web browser: http://<IP>/ (WebUi.h)
+  WebUi::setup();
 
 #endif
 

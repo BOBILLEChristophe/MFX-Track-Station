@@ -1,0 +1,12 @@
+# Partitions of the 4 MB flash (ESP32-DevKitC), board_build.partitions in platformio.ini.
+# nvs at the same place as in the default table: the locomotives, the mfx
+# counter... kept in the NVS stay after the change. Two application slots of
+# 1.5625 MB (room for an update over the network later), LittleFS 768 KB for
+# the configuration files (/config/*.json).
+# Name,   Type, SubType,  Offset,   Size
+nvs,      data, nvs,      0x9000,   0x5000
+otadata,  data, ota,      0xe000,   0x2000
+app0,     app,  ota_0,    0x10000,  0x190000
+app1,     app,  ota_1,    0x1a0000, 0x190000
+spiffs,   data, spiffs,   0x330000, 0xC0000
+coredump, data, coredump, 0x3F0000, 0x10000

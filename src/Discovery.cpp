@@ -1218,7 +1218,7 @@ static void console()
         {
             // Link S88 (L88): K = state; K<b1>,<b2>,<b3>[,<ms>] = number of
             // S88 modules on the buses 1, 2 (RJ45), 3 (6 pins) and cycle time
-            // (K1,0,1 or K1,0,1,10), kept in the NVS
+            // (K1,0,1 or K1,0,1,10), kept in LittleFS (/config/l88.json)
             vTaskDelay(pdMS_TO_TICKS(50));
             uint16_t v[4] = {0, 0, 0, 100};
             uint8_t n = 0;

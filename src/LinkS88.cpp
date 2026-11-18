@@ -8,7 +8,7 @@
 
 #include "LinkS88.h"
 #include "CanBus.h"
-#include <Preferences.h>
+#include "ConfigStore.h"
 
 namespace LinkS88
 {
@@ -24,7 +24,8 @@ namespace LinkS88
     static const uint32_t GAP_MS = 10;
     static const uint8_t MAX_L88 = 4;
     static const uint8_t MAX_MODULES = 31;
-    static const char *NVS_NAMESPACE = "links88";
+    static const char *FILE_NAME = "l88"; // /config/l88.json
+    static const uint8_t FILE_VERSION = 1;
 
     static uint8_t sLength[3] = {0, 0, 0};
     static uint16_t sCycleMs = 100;
@@ -33,6 +34,8 @@ namespace LinkS88
     static uint32_t sKnown[MAX_L88];
     static uint8_t sCount = 0;
     static uint32_t sEvents = 0;
+    static uint16_t sLastContact = 0;
+    static uint8_t sLastState = 0;
 
     // Frames to send, 10 ms apart (written and read by RxTask only)
     static const uint8_t QUEUE = 24;
@@ -121,15 +124,15 @@ namespace LinkS88
 
     void setup()
     {
-        Preferences prefs;
-        if (prefs.begin(NVS_NAMESPACE, false))
-        {
-            sLength[0] = prefs.getUChar("b1", 0);
-            sLength[1] = prefs.getUChar("b2", 0);
-            sLength[2] = prefs.getUChar("b3", 0);
-            sCycleMs = prefs.getUShort("t", 100);
-            prefs.end();
-        }
+        JsonDocument doc;
+        if (!ConfigStore::load(FILE_NAME, doc))
+            return; // defaults: no S88 module, 100 ms
+        JsonArrayConst bus = doc["bus"];
+        for (uint8_t b = 0; b < 3 && b < bus.size(); b++)
+            sLength[b] = min((uint8_t)(bus[b] | 0), MAX_MODULES);
+        sCycleMs = constrain((uint16_t)(doc["cycleMs"] | 100), (uint16_t)10, (uint16_t)1000);
+        Serial.printf("L88: modules %u / %u / %u, cycle %u ms (/config/l88.json)\n", sLength[0], sLength[1],
+                      sLength[2], sCycleMs);
     }
 
     void onBusFrame(const uint8_t *f)
@@ -162,6 +165,8 @@ namespace LinkS88
         {
             sEvents = sEvents + 1;
             const uint16_t contact = (uint16_t)d[2] << 8 | d[3];
+            sLastContact = contact;
+            sLastState = d[5] ? 1 : 0;
             Serial.printf("S88: contact %u %s\n", contact, d[5] ? "on" : "off");
         }
     }
@@ -192,22 +197,41 @@ namespace LinkS88
         }
     }
 
-    void configure(uint8_t bus1, uint8_t bus2, uint8_t bus3, uint16_t cycleMs)
+    bool configure(uint8_t bus1, uint8_t bus2, uint8_t bus3, uint16_t cycleMs)
     {
         sLength[0] = min(bus1, MAX_MODULES);
         sLength[1] = min(bus2, MAX_MODULES);
         sLength[2] = min(bus3, MAX_MODULES);
         sCycleMs = constrain(cycleMs, (uint16_t)10, (uint16_t)1000);
-        Preferences prefs;
-        if (prefs.begin(NVS_NAMESPACE, false))
-        {
-            prefs.putUChar("b1", sLength[0]);
-            prefs.putUChar("b2", sLength[1]);
-            prefs.putUChar("b3", sLength[2]);
-            prefs.putUShort("t", sCycleMs);
-            prefs.end();
-        }
         sReconfigure = true;
+        JsonDocument doc;
+        doc["version"] = FILE_VERSION;
+        JsonArray bus = doc["bus"].to<JsonArray>();
+        for (uint8_t b = 0; b < 3; b++)
+            bus.add(sLength[b]);
+        doc["cycleMs"] = sCycleMs;
+        const bool ok = ConfigStore::save(FILE_NAME, doc);
+        if (!ok)
+            Serial.println("L88: /config/l88.json not written (applied until the next restart)");
+        return ok;
+    }
+
+    void status(JsonObject out)
+    {
+        JsonArray bus = out["bus"].to<JsonArray>();
+        for (uint8_t b = 0; b < 3; b++)
+            bus.add(sLength[b]);
+        out["cycleMs"] = sCycleMs;
+        JsonArray found = out["found"].to<JsonArray>();
+        char uid[9];
+        for (uint8_t i = 0; i < sCount; i++)
+        {
+            snprintf(uid, sizeof(uid), "%08lX", (unsigned long)sKnown[i]);
+            found.add(uid);
+        }
+        out["events"] = sEvents;
+        out["lastContact"] = sLastContact;
+        out["lastState"] = sLastState;
     }
 
     void printStatus()

@@ -39,18 +39,20 @@
    ground of its first S88 module tied to the track rail 0 (the L88 is
    isolated).
 
-   Number of modules and cycle time: serial command K (Discovery.cpp), kept
-   in the NVS.
+   Number of modules and cycle time: serial command K (Discovery.cpp) or
+   web page (WebUi.h), kept in LittleFS, file /config/l88.json:
+     {"version": 1, "bus": [1, 0, 1], "cycleMs": 10}
 
 */
 
 #pragma once
 
 #include <Arduino.h>
+#include <ArduinoJson.h>
 
 namespace LinkS88
 {
-    // Reads the configuration in the NVS. After CanBus::setup().
+    // Reads /config/l88.json. After ConfigStore::setup() and CanBus::setup().
     void setup();
 
     // Every frame received from the bus (13 bytes, format of CanBus), from
@@ -62,9 +64,14 @@ namespace LinkS88
     void loop();
 
     // Number of S88 modules on the buses 1, 2, 3, cycle time (ms) of every
-    // bus: kept in the NVS, sent to the L88 already found. From any task.
-    void configure(uint8_t bus1, uint8_t bus2, uint8_t bus3, uint16_t cycleMs);
+    // bus: saved in /config/l88.json, sent to the L88 already found. From
+    // any task. Returns false if the file could not be written.
+    bool configure(uint8_t bus1, uint8_t bus2, uint8_t bus3, uint16_t cycleMs);
 
     // Configuration, L88 found, S88 events received
     void printStatus();
+
+    // The same for the web page: {"bus": [...], "cycleMs": n, "found":
+    // ["53387A78"], "events": n, "lastContact": n, "lastState": 0|1}
+    void status(JsonObject out);
 }
