@@ -10,6 +10,8 @@
 
 #pragma once
 
+#include <Arduino.h> // PROGMEM
+
 static const char WEB_PAGE[] PROGMEM = R"HTML(<!doctype html>
 <html lang="fr">
 <head>
