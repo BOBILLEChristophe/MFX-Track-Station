@@ -11,6 +11,7 @@
 
 #include "RxTask.h"
 #include "CanBus.h"
+#include "LinkS88.h"
 
 // Prints a frame received from the bus (pings left out: every few seconds),
 // or sent by Rocrail to the bus (prefix "Rocrail->CAN")
@@ -113,6 +114,8 @@ void rxTask(void *pvParameters)
                     Serial.println("CAN: ping answer of a CS2 GUI sent (the MS2 should follow a Central Station)");
                 told = true;
             }
+            // Link S88 (L88): wake-up and configuration, S88 events
+            LinkS88::onBusFrame(busFrame);
             sendToTcp(busFrame, sizeof(busFrame));
             Message::fromBus = true;
             Message::decodeMsg(busFrame);
@@ -120,6 +123,7 @@ void rxTask(void *pvParameters)
         }
         Message::fromBus = false;
         masterPing();
+        LinkS88::loop();
         vTaskDelay(5 / portTICK_PERIOD_MS); // Avoid busy-waiting
     }
 }
